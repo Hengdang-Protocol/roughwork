@@ -150,11 +150,46 @@ export class FileStorage {
     // Basic magic byte detection
     if (content.length >= 8) {
       const header = content.slice(0, 8);
+      
+      // PNG
       if (header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4E && header[3] === 0x47) {
         return 'image/png';
       }
+      
+      // JPEG
       if (header[0] === 0xFF && header[1] === 0xD8 && header[2] === 0xFF) {
         return 'image/jpeg';
+      }
+      
+      // GIF
+      if (header.slice(0, 6).toString() === 'GIF87a' || header.slice(0, 6).toString() === 'GIF89a') {
+        return 'image/gif';
+      }
+      
+      // PDF
+      if (header.slice(0, 4).toString() === '%PDF') {
+        return 'application/pdf';
+      }
+      
+      // ZIP
+      if (header[0] === 0x50 && header[1] === 0x4B && 
+          (header[2] === 0x03 || header[2] === 0x05 || header[2] === 0x07)) {
+        return 'application/zip';
+      }
+    }
+
+    // JSON detection by content
+    if (content.length > 0) {
+      const text = content.toString('utf8', 0, Math.min(content.length, 1024));
+      const trimmed = text.trim();
+      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || 
+          (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+        try {
+          JSON.parse(trimmed);
+          return 'application/json';
+        } catch {
+          // Not valid JSON, continue to extension detection
+        }
       }
     }
 
@@ -163,9 +198,26 @@ export class FileStorage {
     switch (ext) {
       case 'txt': return 'text/plain';
       case 'json': return 'application/json';
-      case 'html': return 'text/html';
+      case 'html': case 'htm': return 'text/html';
       case 'css': return 'text/css';
       case 'js': return 'application/javascript';
+      case 'xml': return 'application/xml';
+      case 'csv': return 'text/csv';
+      case 'md': return 'text/markdown';
+      case 'png': return 'image/png';
+      case 'jpg': case 'jpeg': return 'image/jpeg';
+      case 'gif': return 'image/gif';
+      case 'svg': return 'image/svg+xml';
+      case 'webp': return 'image/webp';
+      case 'pdf': return 'application/pdf';
+      case 'zip': return 'application/zip';
+      case 'tar': return 'application/x-tar';
+      case 'gz': return 'application/gzip';
+      case 'mp4': return 'video/mp4';
+      case 'webm': return 'video/webm';
+      case 'mp3': return 'audio/mpeg';
+      case 'wav': return 'audio/wav';
+      case 'ogg': return 'audio/ogg';
       default: return 'application/octet-stream';
     }
   }

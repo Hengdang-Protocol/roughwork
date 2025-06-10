@@ -1,11 +1,13 @@
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
 import {
   FileMetadata,
   DirectoryListing,
   EventListing,
   ListOptions,
   UploadResponse,
-  HengdangClientOptions
+  HengdangClientOptions,
+  ConditionalRequestOptions,
+  NotModifiedError
 } from './types';
 
 export class HengdangClient {
@@ -22,69 +24,158 @@ export class HengdangClient {
   /**
    * Upload a file to the server
    */
-  async uploadFile(path: string, content: Buffer | Uint8Array | string): Promise<UploadResponse> {
-    const response = await this.api.put(path, content, {
-      headers: {
-        'Content-Type': 'application/octet-stream'
-      }
-    });
+  async uploadFile(path: string, content: Buffer | Uint8Array | string, options?: ConditionalRequestOptions): Promise<UploadResponse> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/octet-stream'
+    };
+
+    // Add conditional request headers
+    if (options?.ifMatch) {
+      headers['If-Match'] = options.ifMatch;
+    }
+    if (options?.ifNoneMatch) {
+      headers['If-None-Match'] = options.ifNoneMatch;
+    }
+    if (options?.ifModifiedSince) {
+      headers['If-Modified-Since'] = options.ifModifiedSince instanceof Date 
+        ? options.ifModifiedSince.toUTCString()
+        : options.ifModifiedSince;
+    }
+    if (options?.ifUnmodifiedSince) {
+      headers['If-Unmodified-Since'] = options.ifUnmodifiedSince instanceof Date
+        ? options.ifUnmodifiedSince.toUTCString()
+        : options.ifUnmodifiedSince;
+    }
+
+    const response = await this.api.put(path, content, { headers });
     return response.data;
   }
 
   /**
    * Upload a text file
    */
-  async uploadText(path: string, text: string): Promise<UploadResponse> {
-    const response = await this.api.put(path, text, {
-      headers: {
-        'Content-Type': 'text/plain'
-      }
-    });
+  async uploadText(path: string, text: string, options?: ConditionalRequestOptions): Promise<UploadResponse> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'text/plain'
+    };
+
+    if (options?.ifMatch) headers['If-Match'] = options.ifMatch;
+    if (options?.ifNoneMatch) headers['If-None-Match'] = options.ifNoneMatch;
+
+    const response = await this.api.put(path, text, { headers });
     return response.data;
   }
 
   /**
    * Upload a JSON file
    */
-  async uploadJSON(path: string, data: any): Promise<UploadResponse> {
-    const response = await this.api.put(path, JSON.stringify(data), {
-      headers: {
-        'Content-Type': 'application/json'
+  async uploadJSON(path: string, data: any, options?: ConditionalRequestOptions): Promise<UploadResponse> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json'
+    };
+
+    if (options?.ifMatch) headers['If-Match'] = options.ifMatch;
+    if (options?.ifNoneMatch) headers['If-None-Match'] = options.ifNoneMatch;
+
+    const response = await this.api.put(path, JSON.stringify(data), { headers });
+    return response.data;
+  }
+
+  /**
+   * Download a file as buffer with conditional request support
+   */
+  async downloadFile(path: string, options?: ConditionalRequestOptions): Promise<Buffer> {
+    const headers: Record<string, string> = {};
+    
+    if (options?.ifNoneMatch) {
+      headers['If-None-Match'] = options.ifNoneMatch;
+    }
+    if (options?.ifModifiedSince) {
+      headers['If-Modified-Since'] = options.ifModifiedSince instanceof Date 
+        ? options.ifModifiedSince.toUTCString()
+        : options.ifModifiedSince;
+    }
+
+    try {
+      const response = await this.api.get(path, {
+        responseType: 'arraybuffer',
+        headers
+      });
+      return Buffer.from(response.data);
+    } catch (error: any) {
+      if (error.response?.status === 304) {
+        throw new NotModifiedError('File not modified', {
+          etag: error.response.headers['etag'],
+          lastModified: error.response.headers['last-modified']
+        });
       }
-    });
-    return response.data;
+      throw error;
+    }
   }
 
   /**
-   * Download a file as buffer
+   * Download a file as text with conditional request support
    */
-  async downloadFile(path: string): Promise<Buffer> {
-    const response = await this.api.get(path, {
-      responseType: 'arraybuffer'
-    });
-    return Buffer.from(response.data);
+  async downloadText(path: string, options?: ConditionalRequestOptions): Promise<string> {
+    const headers: Record<string, string> = {};
+    
+    if (options?.ifNoneMatch) {
+      headers['If-None-Match'] = options.ifNoneMatch;
+    }
+    if (options?.ifModifiedSince) {
+      headers['If-Modified-Since'] = options.ifModifiedSince instanceof Date 
+        ? options.ifModifiedSince.toUTCString()
+        : options.ifModifiedSince;
+    }
+
+    try {
+      const response = await this.api.get(path, {
+        responseType: 'text',
+        headers
+      });
+      return response.data;
+    } catch (error: any) {
+      if (error.response?.status === 304) {
+        throw new NotModifiedError('File not modified', {
+          etag: error.response.headers['etag'],
+          lastModified: error.response.headers['last-modified']
+        });
+      }
+      throw error;
+    }
   }
 
   /**
-   * Download a file as text
+   * Download and parse JSON file with conditional request support
    */
-  async downloadText(path: string): Promise<string> {
-    const response = await this.api.get(path, {
-      responseType: 'text'
-    });
-    return response.data;
+  async downloadJSON<T = any>(path: string, options?: ConditionalRequestOptions): Promise<T> {
+    const headers: Record<string, string> = {};
+    
+    if (options?.ifNoneMatch) {
+      headers['If-None-Match'] = options.ifNoneMatch;
+    }
+    if (options?.ifModifiedSince) {
+      headers['If-Modified-Since'] = options.ifModifiedSince instanceof Date 
+        ? options.ifModifiedSince.toUTCString()
+        : options.ifModifiedSince;
+    }
+
+    try {
+      const response = await this.api.get(path, { headers });
+      return response.data;
+    } catch (error: any) {
+      if (error.response?.status === 304) {
+        throw new NotModifiedError('File not modified', {
+          etag: error.response.headers['etag'],
+          lastModified: error.response.headers['last-modified']
+        });
+      }
+      throw error;
+    }
   }
 
   /**
-   * Download and parse JSON file
-   */
-  async downloadJSON<T = any>(path: string): Promise<T> {
-    const response = await this.api.get(path);
-    return response.data;
-  }
-
-  /**
-   * Get file metadata
+   * Get file metadata using HEAD request
    */
   async getMetadata(path: string): Promise<FileMetadata | null> {
     try {
@@ -93,8 +184,10 @@ export class HengdangClient {
         path,
         size: parseInt(response.headers['content-length'] || '0'),
         contentType: response.headers['content-type'] || 'application/octet-stream',
-        hash: response.headers['etag']?.replace(/"/g, '') || '',
-        timestamp: new Date(response.headers['last-modified'] || '').getTime()
+        hash: this.extractHashFromETag(response.headers['etag']),
+        timestamp: new Date(response.headers['last-modified'] || '').getTime(),
+        etag: response.headers['etag'],
+        lastModified: response.headers['last-modified']
       };
     } catch (error: any) {
       if (error.response?.status === 404) {
@@ -105,7 +198,7 @@ export class HengdangClient {
   }
 
   /**
-   * Check if file exists
+   * Check if file exists using HEAD request
    */
   async exists(path: string): Promise<boolean> {
     const metadata = await this.getMetadata(path);
@@ -170,19 +263,52 @@ export class HengdangClient {
   }
 
   /**
-   * Copy a file (download and re-upload)
+   * Copy a file (download and re-upload) with optional conditional requests
    */
-  async copyFile(sourcePath: string, destPath: string): Promise<UploadResponse> {
+  async copyFile(sourcePath: string, destPath: string, options?: ConditionalRequestOptions): Promise<UploadResponse> {
     const content = await this.downloadFile(sourcePath);
-    return this.uploadFile(destPath, content);
+    return this.uploadFile(destPath, content, options);
   }
 
   /**
-   * Move a file (copy and delete)
+   * Move a file (copy and delete) with optional conditional requests
    */
-  async moveFile(sourcePath: string, destPath: string): Promise<UploadResponse> {
-    const result = await this.copyFile(sourcePath, destPath);
+  async moveFile(sourcePath: string, destPath: string, options?: ConditionalRequestOptions): Promise<UploadResponse> {
+    const result = await this.copyFile(sourcePath, destPath, options);
     await this.deleteFile(sourcePath);
     return result;
+  }
+
+  /**
+   * Sync file only if it has changed (using ETag/Last-Modified)
+   */
+  async syncFile(path: string, content: Buffer | Uint8Array | string): Promise<UploadResponse | null> {
+    try {
+      const metadata = await this.getMetadata(path);
+      if (metadata?.etag) {
+        // Try upload with If-None-Match to avoid overwriting unchanged files
+        return await this.uploadFile(path, content, { ifNoneMatch: metadata.etag });
+      } else {
+        // File doesn't exist, upload normally
+        return await this.uploadFile(path, content);
+      }
+    } catch (error: any) {
+      if (error.response?.status === 412) {
+        // Precondition failed - file hasn't changed
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Extract hash from ETag header (removes quotes and timestamp)
+   */
+  private extractHashFromETag(etag: string | undefined): string {
+    if (!etag) return '';
+    // ETag format: "hash-timestamp"
+    const cleaned = etag.replace(/"/g, '');
+    const hashPart = cleaned.split('-')[0];
+    return hashPart || cleaned;
   }
 }
