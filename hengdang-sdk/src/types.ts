@@ -1,11 +1,10 @@
 export interface FileMetadata {
   path: string;
-  size: number;
+  contentHash: string;
   contentType: string;
-  hash: string;
+  contentLength: number;
   timestamp: number;
-  etag?: string;
-  lastModified?: string;
+  chunkCount: number;
 }
 
 export interface DirectoryEntry {
@@ -47,12 +46,52 @@ export interface UploadResponse {
   contentType: string;
   hash: string;
   timestamp: number;
-  created?: boolean; // true for new files, false for updates
+  created: boolean;
+}
+
+export interface NostrEvent {
+  id?: string;
+  pubkey: string;
+  created_at: number;
+  kind: number;
+  tags: string[][];
+  content: string;
+  sig: string;
+}
+
+export interface Session {
+  sessionId: string;
+  pubkey: string;
+  permissions: string[];
+  appName?: string;
+  createdAt: number;
+  lastUsed: number;
+  expiresAt: number;
+}
+
+export interface AuthResponse {
+  sessionId: string;
+  permissions: string[];
+  expiresAt: number;
+}
+
+export interface SessionInfo {
+  sessionId: string;
+  permissions: string[];
+  appName?: string;
+  createdAt: number;
+  lastUsed: number;
+  expiresAt: number;
+}
+
+export interface SessionListResponse {
+  sessions: Array<SessionInfo & { isCurrent: boolean }>;
 }
 
 export interface HengdangClientOptions {
   baseURL: string;
   timeout?: number;
+  sessionId?: string;
 }
 
 export interface ConditionalRequestOptions {
@@ -89,6 +128,25 @@ export class NotModifiedError extends Error {
     super(message);
     this.name = 'NotModifiedError';
     this.etag = metadata?.etag;
+    this.lastModified = metadata?.lastModified;
+  }
+}
+
+export class AuthenticationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AuthenticationError';
+  }
+}
+
+export class PreconditionFailedError extends Error {
+  public readonly currentETag?: string;
+  public readonly lastModified?: string;
+  
+  constructor(message: string, metadata?: { currentETag?: string; lastModified?: string }) {
+    super(message);
+    this.name = 'PreconditionFailedError';
+    this.currentETag = metadata?.currentETag;
     this.lastModified = metadata?.lastModified;
   }
 }

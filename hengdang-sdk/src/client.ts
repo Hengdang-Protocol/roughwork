@@ -1,4 +1,4 @@
-import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
+import axios, { AxiosInstance } from 'axios';
 import {
   FileMetadata,
   DirectoryListing,
@@ -7,19 +7,119 @@ import {
   UploadResponse,
   HengdangClientOptions,
   ConditionalRequestOptions,
-  NotModifiedError
+  NotModifiedError,
+  AuthenticationError,
+  PreconditionFailedError,
+  NostrEvent,
+  AuthResponse,
+  SessionInfo,
+  SessionListResponse
 } from './types';
 
 export class HengdangClient {
   private api: AxiosInstance;
+  private sessionId?: string;
 
   constructor(options: HengdangClientOptions) {
+    this.sessionId = options.sessionId;
+    
     this.api = axios.create({
       baseURL: options.baseURL,
       timeout: options.timeout || 30000,
-      responseType: 'json'
+      responseType: 'json',
+      withCredentials: true // For session cookies
     });
+
+    // Add auth interceptor
+    this.api.interceptors.request.use((config) => {
+      if (this.sessionId) {
+        config.headers.Authorization = `Bearer ${this.sessionId}`;
+      }
+      return config;
+    });
+
+    // Add error handling interceptor
+    this.api.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (error.response?.status === 401) {
+          throw new AuthenticationError(error.response.data?.message || 'Authentication required');
+        }
+        if (error.response?.status === 412) {
+          throw new PreconditionFailedError(
+            error.response.data?.message || 'Precondition failed',
+            {
+              currentETag: error.response.data?.currentETag,
+              lastModified: error.response.data?.lastModified
+            }
+          );
+        }
+        throw error;
+      }
+    );
   }
+
+  /**
+   * Set session ID for authentication
+   */
+  setSessionId(sessionId: string) {
+    this.sessionId = sessionId;
+  }
+
+  /**
+   * Clear session ID
+   */
+  clearSession() {
+    this.sessionId = undefined;
+  }
+
+  // === AUTHENTICATION METHODS ===
+
+  /**
+   * Create a new session using Nostr authentication
+   */
+  async createSession(authEvent: NostrEvent): Promise<AuthResponse> {
+    const response = await this.api.post('/session', authEvent);
+    const authResponse: AuthResponse = response.data;
+    
+    // Automatically set session ID for future requests
+    this.sessionId = authResponse.sessionId;
+    
+    return authResponse;
+  }
+
+  /**
+   * Get current session information
+   */
+  async getSessionInfo(): Promise<SessionInfo> {
+    const response = await this.api.get('/session');
+    return response.data;
+  }
+
+  /**
+   * Delete current session (logout)
+   */
+  async deleteSession(): Promise<void> {
+    await this.api.delete('/session');
+    this.sessionId = undefined;
+  }
+
+  /**
+   * List all active sessions
+   */
+  async listSessions(): Promise<SessionListResponse> {
+    const response = await this.api.get('/sessions');
+    return response.data;
+  }
+
+  /**
+   * Revoke a specific session
+   */
+  async revokeSession(sessionId: string): Promise<void> {
+    await this.api.delete(`/sessions/${sessionId}`);
+  }
+
+  // === FILE OPERATIONS ===
 
   /**
    * Upload a file to the server
@@ -55,30 +155,17 @@ export class HengdangClient {
    * Upload a text file
    */
   async uploadText(path: string, text: string, options?: ConditionalRequestOptions): Promise<UploadResponse> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'text/plain'
-    };
-
-    if (options?.ifMatch) headers['If-Match'] = options.ifMatch;
-    if (options?.ifNoneMatch) headers['If-None-Match'] = options.ifNoneMatch;
-
-    const response = await this.api.put(path, text, { headers });
-    return response.data;
+    const buffer = Buffer.from(text, 'utf-8');
+    return this.uploadFile(path, buffer, options);
   }
 
   /**
    * Upload a JSON file
    */
   async uploadJSON(path: string, data: any, options?: ConditionalRequestOptions): Promise<UploadResponse> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json'
-    };
-
-    if (options?.ifMatch) headers['If-Match'] = options.ifMatch;
-    if (options?.ifNoneMatch) headers['If-None-Match'] = options.ifNoneMatch;
-
-    const response = await this.api.put(path, JSON.stringify(data), { headers });
-    return response.data;
+    const jsonString = JSON.stringify(data, null, 2);
+    const buffer = Buffer.from(jsonString, 'utf-8');
+    return this.uploadFile(path, buffer, options);
   }
 
   /**
@@ -117,61 +204,16 @@ export class HengdangClient {
    * Download a file as text with conditional request support
    */
   async downloadText(path: string, options?: ConditionalRequestOptions): Promise<string> {
-    const headers: Record<string, string> = {};
-    
-    if (options?.ifNoneMatch) {
-      headers['If-None-Match'] = options.ifNoneMatch;
-    }
-    if (options?.ifModifiedSince) {
-      headers['If-Modified-Since'] = options.ifModifiedSince instanceof Date 
-        ? options.ifModifiedSince.toUTCString()
-        : options.ifModifiedSince;
-    }
-
-    try {
-      const response = await this.api.get(path, {
-        responseType: 'text',
-        headers
-      });
-      return response.data;
-    } catch (error: any) {
-      if (error.response?.status === 304) {
-        throw new NotModifiedError('File not modified', {
-          etag: error.response.headers['etag'],
-          lastModified: error.response.headers['last-modified']
-        });
-      }
-      throw error;
-    }
+    const buffer = await this.downloadFile(path, options);
+    return buffer.toString('utf-8');
   }
 
   /**
    * Download and parse JSON file with conditional request support
    */
   async downloadJSON<T = any>(path: string, options?: ConditionalRequestOptions): Promise<T> {
-    const headers: Record<string, string> = {};
-    
-    if (options?.ifNoneMatch) {
-      headers['If-None-Match'] = options.ifNoneMatch;
-    }
-    if (options?.ifModifiedSince) {
-      headers['If-Modified-Since'] = options.ifModifiedSince instanceof Date 
-        ? options.ifModifiedSince.toUTCString()
-        : options.ifModifiedSince;
-    }
-
-    try {
-      const response = await this.api.get(path, { headers });
-      return response.data;
-    } catch (error: any) {
-      if (error.response?.status === 304) {
-        throw new NotModifiedError('File not modified', {
-          etag: error.response.headers['etag'],
-          lastModified: error.response.headers['last-modified']
-        });
-      }
-      throw error;
-    }
+    const text = await this.downloadText(path, options);
+    return JSON.parse(text);
   }
 
   /**
@@ -180,14 +222,18 @@ export class HengdangClient {
   async getMetadata(path: string): Promise<FileMetadata | null> {
     try {
       const response = await this.api.head(path);
+      
+      // Extract hash from ETag (format: "hash-timestamp")
+      const etag = response.headers['etag'] || '';
+      const hash = this.extractHashFromETag(etag);
+      
       return {
         path,
-        size: parseInt(response.headers['content-length'] || '0'),
+        contentLength: parseInt(response.headers['content-length'] || '0'),
         contentType: response.headers['content-type'] || 'application/octet-stream',
-        hash: this.extractHashFromETag(response.headers['etag']),
+        contentHash: hash,
         timestamp: new Date(response.headers['last-modified'] || '').getTime(),
-        etag: response.headers['etag'],
-        lastModified: response.headers['last-modified']
+        chunkCount: 1 // Not exposed by server, but required by interface
       };
     } catch (error: any) {
       if (error.response?.status === 404) {
@@ -227,7 +273,7 @@ export class HengdangClient {
     const params: any = {};
     if (options.limit) params.limit = options.limit;
     if (options.cursor) params.cursor = options.cursor;
-    if (options.reverse) params.reverse = options.reverse;
+    if (options.reverse !== undefined) params.reverse = options.reverse;
     if (options.shallow !== undefined) params.shallow = options.shallow;
 
     const response = await this.api.get(path, { params });
@@ -262,6 +308,8 @@ export class HengdangClient {
     return response.data;
   }
 
+  // === CONVENIENCE METHODS ===
+
   /**
    * Copy a file (download and re-upload) with optional conditional requests
    */
@@ -285,20 +333,45 @@ export class HengdangClient {
   async syncFile(path: string, content: Buffer | Uint8Array | string): Promise<UploadResponse | null> {
     try {
       const metadata = await this.getMetadata(path);
-      if (metadata?.etag) {
+      if (metadata) {
+        const etag = this.generateETag(metadata.contentHash, metadata.timestamp);
         // Try upload with If-None-Match to avoid overwriting unchanged files
-        return await this.uploadFile(path, content, { ifNoneMatch: metadata.etag });
+        return await this.uploadFile(path, content, { ifNoneMatch: etag });
       } else {
         // File doesn't exist, upload normally
         return await this.uploadFile(path, content);
       }
     } catch (error: any) {
-      if (error.response?.status === 412) {
-        // Precondition failed - file hasn't changed
+      if (error instanceof PreconditionFailedError) {
+        // File hasn't changed
         return null;
       }
       throw error;
     }
+  }
+
+  /**
+   * Batch upload multiple files
+   */
+  async uploadBatch(files: Array<{ path: string; content: Buffer | Uint8Array | string }>): Promise<UploadResponse[]> {
+    const results = await Promise.allSettled(
+      files.map(file => this.uploadFile(file.path, file.content))
+    );
+
+    return results.map((result, index) => {
+      if (result.status === 'fulfilled') {
+        return result.value;
+      } else {
+        throw new Error(`Failed to upload ${files[index].path}: ${result.reason.message}`);
+      }
+    });
+  }
+
+  /**
+   * Generate ETag from hash and timestamp (matches server format)
+   */
+  private generateETag(hash: string, timestamp: number): string {
+    return `"${hash}-${timestamp}"`;
   }
 
   /**
