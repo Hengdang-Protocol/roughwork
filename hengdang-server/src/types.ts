@@ -45,6 +45,33 @@ export interface EventListing {
   hasMore: boolean;
 }
 
+export interface NostrEvent {
+  id?: string;
+  pubkey: string;
+  created_at: number;
+  kind: number;
+  tags: string[][];
+  content: string;
+  sig: string;
+}
+
+export interface Session {
+  sessionId: string;
+  pubkey: string;
+  permissions: string[];
+  appName?: string;
+  createdAt: number;
+  lastUsed: number;
+  expiresAt: number;
+}
+
+export interface AuthResponse {
+  sessionId: string;
+  permissions: string[];
+  expiresAt: number;
+}
+
+
 export const CHUNK_SIZE = 512 * 1024; // 512KB
 export const DEFAULT_LIST_LIMIT = 100;
 export const MAX_LIST_LIMIT = 1000;

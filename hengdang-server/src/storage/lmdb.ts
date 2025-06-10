@@ -1,13 +1,14 @@
 import { open, Database, RootDatabase } from 'lmdb';
 import path from 'path';
 import { config } from '../config';
-import { FileMetadata, Event } from '../types';
+import { FileMetadata, Event, Session } from '../types';
 
 export class LMDBStorage {
   private root: RootDatabase;
   public files: Database<FileMetadata, string>;
   public blobs: Database<Buffer, string>;
   public events: Database<Event, string>;
+  public sessions: Database<Session, string>;
 
   constructor() {
     const dbPath = path.join(config.dataDir, 'lmdb');
@@ -21,6 +22,7 @@ export class LMDBStorage {
     this.files = this.root.openDB('files', { encoding: 'json' });
     this.blobs = this.root.openDB('blobs', { encoding: 'binary' });
     this.events = this.root.openDB('events', { encoding: 'json' });
+    this.sessions = this.root.openDB('sessions', { encoding: 'json' });
   }
 
   generateFileId(): string {
