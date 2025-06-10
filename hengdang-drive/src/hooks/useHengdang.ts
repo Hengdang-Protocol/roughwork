@@ -60,7 +60,7 @@ export const useHengdang = () => {
         created_at: Math.floor(Date.now() / 1000),
         kind: 27235, // NIP-27 auth event
         tags: [
-          ["u", `${window.location.protocol}//${window.location.host}/session`],
+          ["u", `http://localhost:3000/auth/session`],
           ["method", "POST"],
           ["scope", "read"],
           ["scope", "write"],

@@ -1,44 +1,23 @@
-import { createHash } from 'crypto';
+import { verifyEvent, getEventHash } from 'nostr-tools';
 import { NostrEvent } from '../types';
 
-const secp256k1 = require('secp256k1');
-
 /**
- * Calculate event ID (sha256 of serialized event)
+ * Calculate event ID using nostr-tools
  */
 export function calculateEventId(event: Omit<NostrEvent, 'id' | 'sig'>): string {
-  const serialized = JSON.stringify([
-    0, // Reserved for future use
-    event.pubkey,
-    event.created_at,
-    event.kind,
-    event.tags,
-    event.content
-  ]);
-
-  return createHash('sha256').update(serialized).digest('hex');
+  return getEventHash(event as any);
 }
 
 /**
- * Verify a Nostr event signature
+ * Verify a Nostr event signature using nostr-tools
  */
 export function verifyEventSignature(event: NostrEvent): boolean {
   try {
-    // Recalculate event ID
-    const expectedId = calculateEventId(event);
-    if (event.id && event.id !== expectedId) {
-      return false;
-    }
-
-    // Convert hex strings to buffers
-    const pubkeyBuffer = Buffer.from(event.pubkey, 'hex');
-    const signatureBuffer = Buffer.from(event.sig, 'hex');
-    const messageBuffer = Buffer.from(expectedId, 'hex');
-
-    // Verify signature
-    return secp256k1.ecdsaVerify(signatureBuffer, messageBuffer, pubkeyBuffer);
+    const isValid = verifyEvent(event as any);
+    console.log('Event verification result:', isValid);
+    return isValid;
   } catch (error) {
-    console.error('Signature verification error:', error);
+    console.error('Event verification error:', error);
     return false;
   }
 }
@@ -52,7 +31,7 @@ export function extractPermissions(event: NostrEvent): string[] {
     return scopeTags.map(tag => tag[1]);
   }
 
-  return [];
+  return ['read', 'write']; // Default permissions
 }
 
 /**
@@ -77,14 +56,22 @@ export function extractAppName(event: NostrEvent): string {
  * Validate auth event for our server
  */
 export function validateAuthEvent(event: NostrEvent, expectedUrl: string, expectedMethod: string): boolean {
+  console.log('=== Auth Event Validation ===');
+  console.log('Expected URL:', expectedUrl);
+  console.log('Expected Method:', expectedMethod);
+  
   // Check event kind
   if (event.kind !== 27235) {
+    console.log('Invalid event kind:', event.kind);
     return false;
   }
 
   // Check if event is not too old (1 hour max)
   const now = Math.floor(Date.now() / 1000);
-  if (now - event.created_at > 3600) {
+  const age = now - event.created_at;
+  console.log('Event age (seconds):', age);
+  if (age > 3600) {
+    console.log('Event too old');
     return false;
   }
 
@@ -92,13 +79,19 @@ export function validateAuthEvent(event: NostrEvent, expectedUrl: string, expect
   const urlTag = event.tags.find(tag => tag[0] === 'u');
   const methodTag = event.tags.find(tag => tag[0] === 'method');
 
+  console.log('URL tag:', urlTag);
+  console.log('Method tag:', methodTag);
+
   if (!urlTag || urlTag[1] !== expectedUrl) {
+    console.log('URL mismatch. Expected:', expectedUrl, 'Got:', urlTag?.[1]);
     return false;
   }
 
   if (!methodTag || methodTag[1] !== expectedMethod) {
+    console.log('Method mismatch. Expected:', expectedMethod, 'Got:', methodTag?.[1]);
     return false;
   }
 
+  console.log('Auth event validation passed');
   return true;
 }

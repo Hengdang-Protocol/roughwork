@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import cookieParser from 'cookie-parser';
 import { config } from './config';
 import { storage } from './storage/lmdb';
 import fileRoutes from './routes/files';
@@ -17,12 +18,23 @@ app.use(cors({
   credentials: true
 }));
 app.use(morgan('combined'));
+app.use(cookieParser()); // Add cookie parser
 
-// Raw body parser for file uploads
-app.use(express.raw({
-  limit: config.maxFileSize,
-  type: '*/*'
-}));
+// JSON parser for auth and events
+app.use(express.json());
+
+// Raw body parser only for file routes (PUT/POST to file paths)
+app.use('/*', (req, res, next) => {
+  // Only use raw parser for file operations (PUT requests that aren't to /auth or /events)
+  if (req.method === 'PUT' && !req.path.startsWith('/auth') && !req.path.startsWith('/events')) {
+    express.raw({
+      limit: config.maxFileSize,
+      type: '*/*'
+    })(req, res, next);
+  } else {
+    next();
+  }
+});
 
 // Routes
 app.use('/events', eventRoutes);

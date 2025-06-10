@@ -63,7 +63,7 @@ router.post("/session", async (req: Request, res: Response) => {
     }
 
     // Validate auth event for session creation
-    const expectedUrl = `${req.protocol}://${req.get("host")}/session`;
+    const expectedUrl = `${req.protocol}://${req.get("host")}/auth/session`;
     if (!validateAuthEvent(event, expectedUrl, "POST")) {
       return res.status(400).json({
         error: "Invalid auth event",
