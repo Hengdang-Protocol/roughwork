@@ -6,6 +6,7 @@ import { config } from './config';
 import { storage } from './storage/lmdb';
 import fileRoutes from './routes/files';
 import eventRoutes from './routes/events';
+import authRoutes from './routes/auth';
 
 const app = express();
 
@@ -25,6 +26,7 @@ app.use(express.raw({
 
 // Routes
 app.use('/events', eventRoutes);
+app.use('/auth', authRoutes);
 app.use('/', fileRoutes); // Files on root path
 
 // Health check

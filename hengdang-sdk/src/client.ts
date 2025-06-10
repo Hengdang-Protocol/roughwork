@@ -79,7 +79,7 @@ export class HengdangClient {
    * Create a new session using Nostr authentication
    */
   async createSession(authEvent: NostrEvent): Promise<AuthResponse> {
-    const response = await this.api.post('/session', authEvent);
+    const response = await this.api.post('/auth/session', authEvent);
     const authResponse: AuthResponse = response.data;
     
     // Automatically set session ID for future requests
@@ -92,31 +92,16 @@ export class HengdangClient {
    * Get current session information
    */
   async getSessionInfo(): Promise<SessionInfo> {
-    const response = await this.api.get('/session');
+    const response = await this.api.get('/auth/session');
     return response.data;
   }
 
   /**
-   * Delete current session (logout)
+   * Delete current session (logout) -- this doesn't exist i think. claude made it up
    */
   async deleteSession(): Promise<void> {
     await this.api.delete('/session');
     this.sessionId = undefined;
-  }
-
-  /**
-   * List all active sessions
-   */
-  async listSessions(): Promise<SessionListResponse> {
-    const response = await this.api.get('/sessions');
-    return response.data;
-  }
-
-  /**
-   * Revoke a specific session
-   */
-  async revokeSession(sessionId: string): Promise<void> {
-    await this.api.delete(`/sessions/${sessionId}`);
   }
 
   // === FILE OPERATIONS ===

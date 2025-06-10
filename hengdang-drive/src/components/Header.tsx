@@ -1,16 +1,30 @@
 import React from 'react';
-import { Moon, Sun, Home } from 'lucide-react';
+import { Moon, Sun, Home, LogOut, User } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import { type SessionInfo } from '@hengdang/client';
 
 interface HeaderProps {
   currentPath: string;
   onNavigate: (path: string) => void;
+  sessionInfo: SessionInfo | null;
+  onLogout: () => Promise<void>;
 }
 
-export const Header: React.FC<HeaderProps> = ({ currentPath, onNavigate }) => {
+export const Header: React.FC<HeaderProps> = ({ 
+  currentPath, 
+  onNavigate, 
+  sessionInfo,
+  onLogout 
+}) => {
   const { theme, toggleTheme } = useTheme();
 
   const pathParts = currentPath.split('/').filter(Boolean);
+
+  const handleLogout = async () => {
+    if (confirm('Are you sure you want to logout?')) {
+      await onLogout();
+    }
+  };
 
   return (
     <header className="border-b p-4">
@@ -44,10 +58,24 @@ export const Header: React.FC<HeaderProps> = ({ currentPath, onNavigate }) => {
           </nav>
         </div>
 
-        <button onClick={toggleTheme} className="btn btn-sm">
-          {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
-          {theme === 'light' ? 'Dark' : 'Light'}
-        </button>
+        <div className="flex items-center gap-2">
+          {sessionInfo && (
+            <div className="flex items-center gap-2 text-sm text-secondary">
+              <User size={14} />
+              <span>{sessionInfo.appName || 'Hengdang Drive'}</span>
+            </div>
+          )}
+
+          <button onClick={toggleTheme} className="btn btn-sm">
+            {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
+            {theme === 'light' ? 'Dark' : 'Light'}
+          </button>
+
+          <button onClick={handleLogout} className="btn btn-sm text-error">
+            <LogOut size={16} />
+            Logout
+          </button>
+        </div>
       </div>
     </header>
   );

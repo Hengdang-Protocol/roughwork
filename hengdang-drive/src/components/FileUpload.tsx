@@ -1,16 +1,14 @@
 import React, { useRef } from 'react';
-import { Upload, FolderPlus } from 'lucide-react';
+import { Upload } from 'lucide-react';
 
 interface FileUploadProps {
   currentPath: string;
   onUpload: (path: string, file: File) => Promise<void>;
-  onCreateFolder: (path: string) => void;
 }
 
 export const FileUpload: React.FC<FileUploadProps> = ({ 
   currentPath, 
-  onUpload,
-  onCreateFolder 
+  onUpload
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -37,16 +35,6 @@ export const FileUpload: React.FC<FileUploadProps> = ({
     }
   };
 
-  const handleCreateFolder = () => {
-    const name = prompt('Folder name:');
-    if (name) {
-      const folderPath = currentPath === '/' 
-        ? `/${name}/` 
-        : `${currentPath}/${name}/`;
-      onCreateFolder(folderPath);
-    }
-  };
-
   return (
     <div className="flex gap-2 mb-6">
       <input
@@ -63,14 +51,6 @@ export const FileUpload: React.FC<FileUploadProps> = ({
       >
         <Upload size={16} />
         Upload Files
-      </button>
-
-      <button 
-        onClick={handleCreateFolder}
-        className="btn"
-      >
-        <FolderPlus size={16} />
-        New Folder
       </button>
     </div>
   );
