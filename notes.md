@@ -1,0 +1,5 @@
+- We are sending the NIP-98 events in the request body. Not a good idea I think. We should respect the NIP and send it in Authorization header as Nostr <base64 encoded event>
+- Permissions are granted to app globally. We should add a file and directory based permission system
+- Using both Cookie: `hengdang_session=<sessionId>` and Header: `Authorization: Bearer <sessionId>` doesn't seem like a good idea. Is it? If it is, should it be called hengdang_session?
+- Now that I am thinking about this, there is no way for an app to ask for permission to read or write to a directory from a hengserver, which can be granted by the owner using their keys. I need to check the pubky core flow to see how they handle it. Otherwise, the user can't really set how long a session is going to last, which files/dirs an app gets access to etc. Need to think about some OAuth like flow as well
+- Is locking something that is done in Solid, Pubky etc? I don't even know if that's the right way to go about it
