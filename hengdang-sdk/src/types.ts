@@ -120,6 +120,16 @@ export interface ConditionalRequestOptions {
   ifUnmodifiedSince?: Date | string;
 }
 
+// === SSE TYPES ===
+
+export interface FileChangeEvent {
+  path: string;
+  operation: 'PUT' | 'DELETE';
+  timestamp: number;
+}
+
+// === ERROR TYPES ===
+
 export class NotModifiedError extends Error {
   public readonly etag?: string;
   public readonly lastModified?: string;
@@ -148,5 +158,19 @@ export class PreconditionFailedError extends Error {
     this.name = 'PreconditionFailedError';
     this.currentETag = metadata?.currentETag;
     this.lastModified = metadata?.lastModified;
+  }
+}
+
+export class FileLockError extends Error {
+  public readonly lockedBy?: string;
+  public readonly lockedAt?: number;
+  public readonly expiresAt?: number;
+  
+  constructor(message: string, metadata?: { lockedBy?: string; lockedAt?: number; expiresAt?: number }) {
+    super(message);
+    this.name = 'FileLockError';
+    this.lockedBy = metadata?.lockedBy;
+    this.lockedAt = metadata?.lockedAt;
+    this.expiresAt = metadata?.expiresAt;
   }
 }

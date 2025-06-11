@@ -28,7 +28,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, error }) => {
           <div className="w-16 h-16 mx-auto mb-4 bg-white/20 rounded-2xl flex items-center justify-center">
             <Key size={32} className="text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-white mb-2">Uzu Drive</h1>
+          <h1 className="text-3xl font-bold text-white mb-2">Hengdang Drive</h1>
           <p className="text-blue-100 text-sm">
             Decentralized file storage for the future
           </p>

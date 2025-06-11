@@ -2,6 +2,7 @@ import { open, Database, RootDatabase } from 'lmdb';
 import path from 'path';
 import { config } from '../config';
 import { FileMetadata, Event, Session } from '../types';
+import { FileLock } from './locks';
 
 export class LMDBStorage {
   private root: RootDatabase;
@@ -9,6 +10,7 @@ export class LMDBStorage {
   public blobs: Database<Buffer, string>;
   public events: Database<Event, string>;
   public sessions: Database<Session, string>;
+  public locks: Database<FileLock, string>;
 
   constructor() {
     const dbPath = path.join(config.dataDir, 'lmdb');
@@ -23,6 +25,7 @@ export class LMDBStorage {
     this.blobs = this.root.openDB('blobs', { encoding: 'binary' });
     this.events = this.root.openDB('events', { encoding: 'json' });
     this.sessions = this.root.openDB('sessions', { encoding: 'json' });
+    this.locks = this.root.openDB('locks', { encoding: 'json' });
   }
 
   generateFileId(): string {

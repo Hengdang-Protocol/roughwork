@@ -1,6 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { fileStorage } from '../storage/files';
 import { validatePath, parseListOptions, validateConditionalHeaders } from '../middleware/validation';
+import { checkFileLock, releaseFileLock, handleLockRequest } from '../middleware/locks';
+import { broadcastFileChange } from './events-stream';
+import { authenticateSession } from '../middleware/auth';
 
 const router = Router();
 
@@ -20,7 +23,7 @@ function parseHttpDate(dateString: string): number {
 }
 
 // HEAD - Get file metadata without content
-router.head('/*', validatePath, async (req: Request, res: Response) => {
+router.head('/*', validatePath, authenticateSession, async (req: Request, res: Response) => {
   try {
     const metadata = await fileStorage.getMetadata(req.path);
     if (!metadata) {
@@ -46,7 +49,8 @@ router.head('/*', validatePath, async (req: Request, res: Response) => {
 });
 
 // GET - Read file or list directory with conditional request support
-router.get('/*', validatePath, async (req: Request, res: Response) => {
+// Also handle lock requests (?lock=acquire/release/refresh/status)
+router.get('/*', validatePath, authenticateSession, handleLockRequest, async (req: Request, res: Response) => {
   try {
     const path = req.path;
     const metadata = await fileStorage.getMetadata(path);
@@ -110,97 +114,109 @@ router.get('/*', validatePath, async (req: Request, res: Response) => {
   }
 });
 
-// PUT - Write file with proper response codes and conditional request support
-router.put('/*', validatePath, validateConditionalHeaders, async (req: Request, res: Response) => {
-  try {
-    const path = req.path;
-    const content = req.body as Buffer;
+// PUT - Write file with lock checking and proper response codes
+router.put('/*', 
+  validatePath, 
+  validateConditionalHeaders, 
+  authenticateSession,
+  checkFileLock,      // Check/acquire lock before writing
+  releaseFileLock,    // Release lock after writing
+  async (req: Request, res: Response) => {
+    try {
+      const path = req.path;
+      const content = req.body as Buffer;
 
-    if (!Buffer.isBuffer(content)) {
-      return res.status(400).json({ 
-        error: 'Invalid content',
-        message: 'Request body must be binary data'
-      });
-    }
-
-    // Check if file already exists
-    const existingMetadata = await fileStorage.getMetadata(path);
-    const isUpdate = !!existingMetadata;
-
-    // Handle conditional requests
-    if (existingMetadata) {
-      const existingETag = generateETag(existingMetadata.contentHash, existingMetadata.timestamp);
-      
-      // If-Match: only proceed if ETag matches (for safe updates)
-      const ifMatch = req.headers['if-match'];
-      if (ifMatch && ifMatch !== existingETag) {
-        return res.status(412).json({ 
-          error: 'Precondition Failed',
-          message: 'File has been modified by another client',
-          currentETag: existingETag
+      if (!Buffer.isBuffer(content)) {
+        return res.status(400).json({ 
+          error: 'Invalid content',
+          message: 'Request body must be binary data'
         });
       }
 
-      // If-None-Match: only proceed if ETag doesn't match (avoid duplicates)
-      const ifNoneMatch = req.headers['if-none-match'];
-      if (ifNoneMatch && (ifNoneMatch === '*' || ifNoneMatch === existingETag)) {
-        return res.status(412).json({ 
-          error: 'Precondition Failed',
-          message: 'File already exists with same content',
-          currentETag: existingETag
-        });
-      }
+      // Check if file already exists
+      const existingMetadata = await fileStorage.getMetadata(path);
+      const isUpdate = !!existingMetadata;
 
-      // If-Unmodified-Since: only proceed if not modified since date
-      const ifUnmodifiedSince = req.headers['if-unmodified-since'];
-      if (ifUnmodifiedSince) {
-        const clientDate = parseHttpDate(ifUnmodifiedSince);
-        if (!isNaN(clientDate) && existingMetadata.timestamp > clientDate) {
+      // Handle conditional requests
+      if (existingMetadata) {
+        const existingETag = generateETag(existingMetadata.contentHash, existingMetadata.timestamp);
+        
+        // If-Match: only proceed if ETag matches (for safe updates)
+        const ifMatch = req.headers['if-match'];
+        if (ifMatch && ifMatch !== existingETag) {
           return res.status(412).json({ 
             error: 'Precondition Failed',
-            message: 'File has been modified since specified date',
-            lastModified: formatHttpDate(existingMetadata.timestamp)
+            message: 'File has been modified by another client',
+            currentETag: existingETag
+          });
+        }
+
+        // If-None-Match: only proceed if ETag doesn't match (avoid duplicates)
+        const ifNoneMatch = req.headers['if-none-match'];
+        if (ifNoneMatch && (ifNoneMatch === '*' || ifNoneMatch === existingETag)) {
+          return res.status(412).json({ 
+            error: 'Precondition Failed',
+            message: 'File already exists with same content',
+            currentETag: existingETag
+          });
+        }
+
+        // If-Unmodified-Since: only proceed if not modified since date
+        const ifUnmodifiedSince = req.headers['if-unmodified-since'];
+        if (ifUnmodifiedSince) {
+          const clientDate = parseHttpDate(ifUnmodifiedSince);
+          if (!isNaN(clientDate) && existingMetadata.timestamp > clientDate) {
+            return res.status(412).json({ 
+              error: 'Precondition Failed',
+              message: 'File has been modified since specified date',
+              lastModified: formatHttpDate(existingMetadata.timestamp)
+            });
+          }
+        }
+      } else {
+        // File doesn't exist - check If-Match (should fail)
+        const ifMatch = req.headers['if-match'];
+        if (ifMatch) {
+          return res.status(412).json({ 
+            error: 'Precondition Failed',
+            message: 'Cannot match ETag for non-existent file'
           });
         }
       }
-    } else {
-      // File doesn't exist - check If-Match (should fail)
-      const ifMatch = req.headers['if-match'];
-      if (ifMatch) {
-        return res.status(412).json({ 
-          error: 'Precondition Failed',
-          message: 'Cannot match ETag for non-existent file'
-        });
+
+      const metadata = await fileStorage.writeFile(path, content);
+      
+      // Broadcast file change event to SSE clients
+      if (req.session) {
+        broadcastFileChange(req.session.pubkey, path, 'PUT');
       }
+      
+      const etag = generateETag(metadata.contentHash, metadata.timestamp);
+      const lastModified = formatHttpDate(metadata.timestamp);
+
+      res.set({
+        'ETag': etag,
+        'Last-Modified': lastModified,
+        'Location': path
+      });
+
+      // 200 for updates, 201 for new files
+      const statusCode = isUpdate ? 200 : 201;
+      
+      res.status(statusCode).json({
+        path: metadata.path,
+        size: metadata.contentLength,
+        contentType: metadata.contentType,
+        hash: metadata.contentHash,
+        timestamp: metadata.timestamp,
+        created: !isUpdate
+      });
+    } catch (error) {
+      console.error('PUT error:', error);
+      res.status(500).json({ error: 'Internal server error' });
     }
-
-    const metadata = await fileStorage.writeFile(path, content);
-    
-    const etag = generateETag(metadata.contentHash, metadata.timestamp);
-    const lastModified = formatHttpDate(metadata.timestamp);
-
-    res.set({
-      'ETag': etag,
-      'Last-Modified': lastModified,
-      'Location': path
-    });
-
-    // 200 for updates, 201 for new files
-    const statusCode = isUpdate ? 200 : 201;
-    
-    res.status(statusCode).json({
-      path: metadata.path,
-      size: metadata.contentLength,
-      contentType: metadata.contentType,
-      hash: metadata.contentHash,
-      timestamp: metadata.timestamp,
-      created: !isUpdate
-    });
-  } catch (error) {
-    console.error('PUT error:', error);
-    res.status(500).json({ error: 'Internal server error' });
   }
-});
+);
 
 // DELETE - Delete file with proper response codes
 router.delete('/*', validatePath, async (req: Request, res: Response) => {
@@ -212,6 +228,11 @@ router.delete('/*', validatePath, async (req: Request, res: Response) => {
         error: 'File not found',
         message: 'The specified file does not exist'
       });
+    }
+
+    // Broadcast file change event to SSE clients
+    if (req.session) {
+      broadcastFileChange(req.session.pubkey, req.path, 'DELETE');
     }
 
     // 204 No Content for successful deletion

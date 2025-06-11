@@ -1,10 +1,12 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   createClient,
   type DirectoryEntry,
   type NostrEvent,
   type SessionInfo,
   AuthenticationError,
+  FileLockError,
+  type FileChangeEvent,
 } from "@hengdang/client";
 
 const client = createClient("http://localhost:3000");
@@ -19,6 +21,19 @@ declare global {
   }
 }
 
+export interface UploadProgress {
+  fileName: string;
+  status: "uploading" | "completed" | "error";
+  error?: string;
+}
+
+export interface FileState {
+  path: string;
+  isLocked: boolean;
+  lockedBy?: string;
+  isPreviewOpen: boolean;
+}
+
 export const useHengdang = () => {
   const [currentPath, setCurrentPath] = useState("/");
   const [files, setFiles] = useState<DirectoryEntry[]>([]);
@@ -27,6 +42,11 @@ export const useHengdang = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress[]>([]);
+  const [fileStates, setFileStates] = useState<Map<string, FileState>>(new Map());
+
+  // SSE connection ref
+  const sseCleanupRef = useRef<(() => void) | null>(null);
 
   // Check existing session on mount
   const checkAuth = async () => {
@@ -42,6 +62,67 @@ export const useHengdang = () => {
       setAuthLoading(false);
     }
   };
+
+  // Setup SSE connection for real-time updates
+  const setupSSE = useCallback(() => {
+    if (!isAuthenticated || !sessionInfo || sseCleanupRef.current) return;
+
+    try {
+      const cleanup = client.onFileChange(
+        (event: FileChangeEvent) => {
+          console.log("File change event:", event);
+
+          // Refresh current directory if the changed file is in it
+          if (event.path.startsWith(currentPath) || currentPath === "/") {
+            loadDirectory(currentPath, false); // Refresh without loading state
+          }
+
+          // Update file states
+          setFileStates((prev) => {
+            const newStates = new Map(prev);
+            if (event.operation === "DELETE") {
+              newStates.delete(event.path);
+            }
+            return newStates;
+          });
+        },
+        currentPath === "/" ? undefined : `${currentPath}/*`
+      );
+
+      sseCleanupRef.current = cleanup;
+    } catch (error) {
+      console.error("Failed to setup SSE:", error);
+    }
+  }, [isAuthenticated, sessionInfo, currentPath]);
+
+  // Cleanup SSE on unmount or auth change
+  useEffect(() => {
+    return () => {
+      if (sseCleanupRef.current) {
+        sseCleanupRef.current();
+        sseCleanupRef.current = null;
+      }
+    };
+  }, []);
+
+  // Setup SSE when authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      setupSSE();
+    } else {
+      if (sseCleanupRef.current) {
+        sseCleanupRef.current();
+        sseCleanupRef.current = null;
+      }
+    }
+
+    return () => {
+      if (sseCleanupRef.current) {
+        sseCleanupRef.current();
+        sseCleanupRef.current = null;
+      }
+    };
+  }, [isAuthenticated, setupSSE]);
 
   // Authenticate with Nostr extension (NIP-07)
   const authenticate = async () => {
@@ -74,6 +155,9 @@ export const useHengdang = () => {
       const signedEvent = await window.nostr.signEvent(authEvent);
       const response = await client.createSession(signedEvent);
 
+      console.log("Auth response:", response);
+      console.log("Session ID:", response.sessionId);
+
       setIsAuthenticated(true);
       await checkAuth(); // Refresh session info
       return response;
@@ -92,17 +176,24 @@ export const useHengdang = () => {
       setIsAuthenticated(false);
       setSessionInfo(null);
       client.clearSession();
+
+      // Cleanup SSE
+      if (sseCleanupRef.current) {
+        sseCleanupRef.current();
+        sseCleanupRef.current = null;
+      }
     }
   };
 
-  const loadDirectory = async (path: string) => {
+  const loadDirectory = async (path: string, showLoading: boolean = true) => {
     if (!isAuthenticated) {
       setError("Authentication required");
       return;
     }
 
-    setLoading(true);
+    if (showLoading) setLoading(true);
     setError(null);
+
     try {
       const listing = await client.listDirectory(path);
       setFiles(listing.entries);
@@ -117,36 +208,180 @@ export const useHengdang = () => {
       }
       setFiles([]);
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   };
 
   const uploadFile = async (path: string, file: File) => {
     if (!isAuthenticated) throw new Error("Authentication required");
 
-    const buffer = await file.arrayBuffer();
-    await client.uploadFile(path, new Uint8Array(buffer));
-    await loadDirectory(currentPath); // Refresh
+    // Initialize upload progress
+    setUploadProgress((prev) => [
+      ...prev,
+      {
+        fileName: file.name,
+        status: "uploading",
+      },
+    ]);
+
+    try {
+      const buffer = await file.arrayBuffer();
+
+      // Upload file
+      await client.uploadFile(path, new Uint8Array(buffer));
+
+      // Complete upload
+      setUploadProgress((prev) =>
+        prev.map((upload) =>
+          upload.fileName === file.name && upload.status === "uploading"
+            ? { ...upload, status: "completed" }
+            : upload
+        )
+      );
+
+      // Remove completed upload after delay
+      setTimeout(() => {
+        setUploadProgress((prev) =>
+          prev.filter(
+            (upload) =>
+              !(upload.fileName === file.name && upload.status === "completed")
+          )
+        );
+      }, 2000);
+
+      await loadDirectory(currentPath, false); // Refresh without loading state
+    } catch (err: any) {
+      // Handle file lock error
+      if (err instanceof FileLockError) {
+        setUploadProgress((prev) =>
+          prev.map((upload) =>
+            upload.fileName === file.name && upload.status === "uploading"
+              ? {
+                  ...upload,
+                  status: "error",
+                  error: "File is currently being edited",
+                }
+              : upload
+          )
+        );
+      } else {
+        setUploadProgress((prev) =>
+          prev.map((upload) =>
+            upload.fileName === file.name && upload.status === "uploading"
+              ? { ...upload, status: "error", error: err.message || "Upload failed" }
+              : upload
+          )
+        );
+      }
+
+      // Remove failed upload after delay
+      setTimeout(() => {
+        setUploadProgress((prev) =>
+          prev.filter(
+            (upload) => !(upload.fileName === file.name && upload.status === "error")
+          )
+        );
+      }, 5000);
+
+      throw err;
+    }
   };
 
   const deleteFile = async (path: string) => {
     if (!isAuthenticated) throw new Error("Authentication required");
 
-    await client.deleteFile(path);
-    await loadDirectory(currentPath); // Refresh
+    try {
+      await client.deleteFile(path);
+      await loadDirectory(currentPath, false); // Refresh without loading state
+    } catch (err: any) {
+      if (err instanceof FileLockError) {
+        setError("Cannot delete file: it is currently being edited");
+      } else {
+        setError(err.message || "Failed to delete file");
+      }
+      throw err;
+    }
   };
 
   const downloadFile = async (path: string) => {
     if (!isAuthenticated) throw new Error("Authentication required");
 
-    const buffer = await client.downloadFile(path);
-    const blob = new Blob([buffer]);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = path.split("/").pop() || "download";
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      const buffer = await client.downloadFile(path);
+      const blob = new Blob([buffer]);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = path.split("/").pop() || "download";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setError(err.message || "Failed to download file");
+      throw err;
+    }
+  };
+
+  // Check if file is locked
+  const checkFileLock = async (path: string) => {
+    try {
+      // Try to get file metadata to check if it exists and is accessible
+      const metadata = await client.getMetadata(path);
+      return metadata !== null;
+    } catch (err: any) {
+      if (err instanceof FileLockError) {
+        // Update file state to show it's locked
+        setFileStates((prev) => {
+          const newStates = new Map(prev);
+          newStates.set(path, {
+            path,
+            isLocked: true,
+            lockedBy: err.lockedBy,
+            isPreviewOpen: false,
+          });
+          return newStates;
+        });
+        return false;
+      }
+      return true;
+    }
+  };
+
+  // Get file content for preview
+  const getFileForPreview = async (
+    path: string
+  ): Promise<{ content: string | ArrayBuffer; contentType: string } | null> => {
+    try {
+      const metadata = await client.getMetadata(path);
+      if (!metadata) return null;
+
+      if (
+        metadata.contentType.startsWith("text/") ||
+        metadata.contentType === "application/json" ||
+        path.endsWith(".md")
+      ) {
+        const content = await client.downloadText(path);
+        return { content, contentType: metadata.contentType };
+      } else if (
+        metadata.contentType.startsWith("image/") ||
+        metadata.contentType.startsWith("video/") ||
+        metadata.contentType === "application/pdf"
+      ) {
+        const buffer = await client.downloadFile(path);
+        return { content: buffer, contentType: metadata.contentType };
+      }
+
+      return null;
+    } catch (err: any) {
+      console.error("Failed to get file for preview:", err);
+      return null;
+    }
+  };
+
+  // Clear upload progress manually
+  const clearUploadProgress = (fileName: string) => {
+    setUploadProgress((prev) =>
+      prev.filter((upload) => upload.fileName !== fileName)
+    );
   };
 
   // Load directory when authenticated
@@ -179,6 +414,13 @@ export const useHengdang = () => {
     authenticate,
     logout,
     checkAuth,
+
+    // New premium features
+    uploadProgress,
+    clearUploadProgress,
+    fileStates,
+    checkFileLock,
+    getFileForPreview,
 
     // Client
     client,

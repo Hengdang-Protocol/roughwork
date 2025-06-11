@@ -10,18 +10,21 @@ import {
   NotModifiedError,
   AuthenticationError,
   PreconditionFailedError,
+  FileLockError,
   NostrEvent,
   AuthResponse,
   SessionInfo,
-  SessionListResponse
+  FileChangeEvent
 } from './types';
 
 export class HengdangClient {
   private api: AxiosInstance;
   private sessionId?: string;
+  private baseURL: string;
 
   constructor(options: HengdangClientOptions) {
     this.sessionId = options.sessionId;
+    this.baseURL = options.baseURL;
     
     this.api = axios.create({
       baseURL: options.baseURL,
@@ -54,6 +57,16 @@ export class HengdangClient {
             }
           );
         }
+        if (error.response?.status === 423) {
+          throw new FileLockError(
+            error.response.data?.message || 'File is locked',
+            {
+              lockedBy: error.response.data?.lockedBy,
+              lockedAt: error.response.data?.lockedAt,
+              expiresAt: error.response.data?.expiresAt
+            }
+          );
+        }
         throw error;
       }
     );
@@ -71,6 +84,58 @@ export class HengdangClient {
    */
   clearSession() {
     this.sessionId = undefined;
+  }
+
+  // === SSE METHODS ===
+
+  /**
+   * Subscribe to file change events via Server-Sent Events
+   */
+  subscribeToChanges(pathFilter?: string): EventSource {
+    if (!this.sessionId) {
+      throw new Error('Must be authenticated to subscribe to changes');
+    }
+
+    const url = new URL('/events/stream', this.baseURL);
+    if (pathFilter) {
+      url.searchParams.set('path', pathFilter);
+    }
+
+    const eventSource = new EventSource(url.toString(), {
+      withCredentials: true
+    });
+
+    return eventSource;
+  }
+
+  /**
+   * Subscribe to changes with a callback function
+   */
+  onFileChange(callback: (event: FileChangeEvent) => void, pathFilter?: string): () => void {
+    const eventSource = this.subscribeToChanges(pathFilter);
+    
+    const handleMessage = (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'file_change') {
+          callback({
+            path: data.path,
+            operation: data.operation,
+            timestamp: data.timestamp
+          });
+        }
+      } catch (error) {
+        console.error('Error parsing SSE message:', error);
+      }
+    };
+
+    eventSource.addEventListener('message', handleMessage);
+
+    // Return cleanup function
+    return () => {
+      eventSource.removeEventListener('message', handleMessage);
+      eventSource.close();
+    };
   }
 
   // === AUTHENTICATION METHODS ===
@@ -97,10 +162,10 @@ export class HengdangClient {
   }
 
   /**
-   * Delete current session (logout) -- this doesn't exist i think. claude made it up
+   * Delete current session (logout)
    */
   async deleteSession(): Promise<void> {
-    await this.api.delete('/session');
+    await this.api.delete('/auth/session');
     this.sessionId = undefined;
   }
 
@@ -109,7 +174,7 @@ export class HengdangClient {
   /**
    * Upload a file to the server
    */
-  async uploadFile(path: string, content: Buffer | Uint8Array | string, options?: ConditionalRequestOptions): Promise<UploadResponse> {
+  async uploadFile(path: string, content: Uint8Array | string, options?: ConditionalRequestOptions): Promise<UploadResponse> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/octet-stream'
     };
@@ -132,8 +197,15 @@ export class HengdangClient {
         : options.ifUnmodifiedSince;
     }
 
-    const response = await this.api.put(path, content, { headers });
-    return response.data;
+    try {
+      const response = await this.api.put(path, content, { headers });
+      return response.data;
+    } catch (error: any) {
+      if (error instanceof FileLockError) {
+        throw new Error(`File is locked: ${error.message}`);
+      }
+      throw error;
+    }
   }
 
   /**
@@ -156,7 +228,7 @@ export class HengdangClient {
   /**
    * Download a file as buffer with conditional request support
    */
-  async downloadFile(path: string, options?: ConditionalRequestOptions): Promise<Buffer> {
+  async downloadFile(path: string, options?: ConditionalRequestOptions): Promise<Uint8Array> {
     const headers: Record<string, string> = {};
     
     if (options?.ifNoneMatch) {
@@ -173,7 +245,7 @@ export class HengdangClient {
         responseType: 'arraybuffer',
         headers
       });
-      return Buffer.from(response.data);
+      return new Uint8Array(response.data);
     } catch (error: any) {
       if (error.response?.status === 304) {
         throw new NotModifiedError('File not modified', {
@@ -190,7 +262,7 @@ export class HengdangClient {
    */
   async downloadText(path: string, options?: ConditionalRequestOptions): Promise<string> {
     const buffer = await this.downloadFile(path, options);
-    return buffer.toString('utf-8');
+    return new TextDecoder('utf-8').decode(buffer);
   }
 
   /**
