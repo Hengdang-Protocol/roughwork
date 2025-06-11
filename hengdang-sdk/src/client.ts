@@ -212,17 +212,18 @@ export class HengdangClient {
    * Upload a text file
    */
   async uploadText(path: string, text: string, options?: ConditionalRequestOptions): Promise<UploadResponse> {
-    const buffer = Buffer.from(text, 'utf-8');
-    return this.uploadFile(path, buffer, options);
+    const uint8 = new TextEncoder().encode(text);
+    return this.uploadFile(path, uint8, options);
   }
+
 
   /**
    * Upload a JSON file
    */
   async uploadJSON(path: string, data: any, options?: ConditionalRequestOptions): Promise<UploadResponse> {
     const jsonString = JSON.stringify(data, null, 2);
-    const buffer = Buffer.from(jsonString, 'utf-8');
-    return this.uploadFile(path, buffer, options);
+    const uint8 = new TextEncoder().encode(jsonString);
+    return this.uploadFile(path, uint8, options);
   }
 
   /**
@@ -387,7 +388,7 @@ export class HengdangClient {
   /**
    * Sync file only if it has changed (using ETag/Last-Modified)
    */
-  async syncFile(path: string, content: Buffer | Uint8Array | string): Promise<UploadResponse | null> {
+  async syncFile(path: string, content: Uint8Array | string): Promise<UploadResponse | null> {
     try {
       const metadata = await this.getMetadata(path);
       if (metadata) {
@@ -407,10 +408,11 @@ export class HengdangClient {
     }
   }
 
+
   /**
    * Batch upload multiple files
    */
-  async uploadBatch(files: Array<{ path: string; content: Buffer | Uint8Array | string }>): Promise<UploadResponse[]> {
+  async uploadBatch(files: Array<{ path: string; content: Uint8Array | string }>): Promise<UploadResponse[]> {
     const results = await Promise.allSettled(
       files.map(file => this.uploadFile(file.path, file.content))
     );

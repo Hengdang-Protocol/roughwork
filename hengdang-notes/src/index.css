@@ -1,0 +1,177 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap");
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom scrollbar */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 #f1f5f9;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 8px;
+  transition: background-color 0.2s ease;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+[data-theme="dark"] .custom-scrollbar {
+  scrollbar-color: #4b5563 #1f2937;
+}
+
+[data-theme="dark"] .custom-scrollbar::-webkit-scrollbar-track {
+  background: #1f2937;
+}
+
+[data-theme="dark"] .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #4b5563;
+}
+
+[data-theme="dark"] .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+
+/* Monaco Editor */
+.monaco-editor {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
+}
+
+/* Markdown content styling */
+.markdown-content {
+  line-height: 1.6;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+}
+
+.markdown-content h1 {
+  font-size: 2em;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 0.3em;
+}
+
+.markdown-content h2 {
+  font-size: 1.5em;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 0.3em;
+}
+
+.markdown-content h3 {
+  font-size: 1.25em;
+}
+
+.markdown-content p {
+  margin-bottom: 1em;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  margin-bottom: 1em;
+  padding-left: 1.5em;
+}
+
+.markdown-content li {
+  margin-bottom: 0.25em;
+}
+
+.markdown-content blockquote {
+  border-left: 4px solid #e5e7eb;
+  padding-left: 1em;
+  margin: 1em 0;
+  color: #6b7280;
+}
+
+.markdown-content code {
+  background-color: #f3f4f6;
+  padding: 0.2em 0.4em;
+  border-radius: 3px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.85em;
+}
+
+.markdown-content pre {
+  background-color: #f3f4f6;
+  padding: 1em;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 1em 0;
+}
+
+.markdown-content pre code {
+  background-color: transparent;
+  padding: 0;
+}
+
+/* Dark theme styles */
+[data-theme="dark"] .markdown-content h1,
+[data-theme="dark"] .markdown-content h2 {
+  border-bottom-color: #374151;
+}
+
+[data-theme="dark"] .markdown-content blockquote {
+  border-left-color: #374151;
+  color: #9ca3af;
+}
+
+[data-theme="dark"] .markdown-content code {
+  background-color: #374151;
+}
+
+[data-theme="dark"] .markdown-content pre {
+  background-color: #374151;
+}
+
+/* Wiki-style links */
+.wiki-link {
+  color: #3b82f6;
+  text-decoration: none;
+  border-bottom: 1px dotted #3b82f6;
+}
+
+.wiki-link:hover {
+  background-color: #dbeafe;
+  text-decoration: none;
+}
+
+[data-theme="dark"] .wiki-link:hover {
+  background-color: #1e3a8a;
+}
+
+.wiki-link-missing {
+  color: #ef4444;
+  border-bottom-color: #ef4444;
+}
+
+/* Focus styles */
+*:focus {
+  outline: none;
+}
+
+*:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
