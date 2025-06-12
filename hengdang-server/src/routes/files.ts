@@ -25,9 +25,16 @@ function parseHttpDate(dateString: string): number {
 // HEAD - Get file metadata without content
 router.head('/*', validatePath, authenticateSession, async (req: Request, res: Response) => {
   try {
-    const metadata = await fileStorage.getMetadata(req.path);
+    const path = req.path;
+    const metadata = await fileStorage.getMetadata(path);
+
     if (!metadata) {
       return res.status(404).end();
+    }
+
+    // Check file ownership
+    if (metadata.owner && req.session?.pubkey !== metadata.owner) {
+      return res.status(403).end();
     }
 
     const etag = generateETag(metadata.contentHash, metadata.timestamp);
@@ -56,6 +63,11 @@ router.get('/*', validatePath, authenticateSession, handleLockRequest, async (re
     const metadata = await fileStorage.getMetadata(path);
 
     if (metadata) {
+      // Check file ownership
+      if (metadata.owner && req.session?.pubkey !== metadata.owner) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
       // File exists - handle conditional requests first
       const etag = generateETag(metadata.contentHash, metadata.timestamp);
       const lastModified = formatHttpDate(metadata.timestamp);
@@ -94,7 +106,8 @@ router.get('/*', validatePath, authenticateSession, handleLockRequest, async (re
     } else {
       // Try directory listing
       const options = parseListOptions(req);
-      const listing = await fileStorage.listDirectory(path, options);
+      const userPubkey = req.session?.pubkey; // Filter by user's files
+      const listing = await fileStorage.listDirectory(path, options, userPubkey);
       
       if (listing.entries.length === 0 && !path.endsWith('/')) {
         return res.status(404).json({ error: 'File or directory not found' });
@@ -136,6 +149,14 @@ router.put('/*',
       // Check if file already exists
       const existingMetadata = await fileStorage.getMetadata(path);
       const isUpdate = !!existingMetadata;
+
+      // Check file ownership for updates
+      if (existingMetadata && existingMetadata.owner && req.session?.pubkey !== existingMetadata.owner) {
+        return res.status(403).json({
+          error: 'Access denied',
+          message: 'You can only modify your own files'
+        });
+      }
 
       // Handle conditional requests
       if (existingMetadata) {
@@ -184,7 +205,7 @@ router.put('/*',
         }
       }
 
-      const metadata = await fileStorage.writeFile(path, content);
+      const metadata = await fileStorage.writeFile(path, content, req.session?.pubkey);
       
       // Broadcast file change event to SSE clients
       if (req.session) {
@@ -211,16 +232,31 @@ router.put('/*',
         timestamp: metadata.timestamp,
         created: !isUpdate
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('PUT error:', error);
+      if (error.message === 'Storage limit exceeded') {
+        return res.status(413).json({ 
+          error: 'Storage limit exceeded',
+          message: 'Upload would exceed your storage quota'
+        });
+      }
       res.status(500).json({ error: 'Internal server error' });
     }
   }
 );
 
 // DELETE - Delete file with proper response codes
-router.delete('/*', validatePath, async (req: Request, res: Response) => {
+router.delete('/*', validatePath, authenticateSession, async (req: Request, res: Response) => {
   try {
+    // Check file ownership before deletion
+    const metadata = await fileStorage.getMetadata(req.path);
+    if (metadata && metadata.owner && req.session?.pubkey !== metadata.owner) {
+      return res.status(403).json({ 
+        error: 'Access denied',
+        message: 'You can only delete your own files'
+      });
+    }
+
     const deleted = await fileStorage.deleteFile(req.path);
     
     if (!deleted) {

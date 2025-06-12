@@ -7,14 +7,15 @@ import {
   extractAppName,
 } from "../utils/nostr";
 import { sessionStorage } from "../storage/sessions";
+import { userStorage } from "../storage/users";
 
 const router = Router();
 
 // Get owner pubkey from environment
-const OWNER_PUBKEY = process.env.OWNER_PUBKEY_HEX;
+const OWNER_PUBKEY = process.env.ADMIN_KEY;
 
 if (!OWNER_PUBKEY) {
-  console.warn("WARNING: No OWNER_PUBKEY_HEX set in environment variables");
+  console.warn("WARNING: No ADMIN_KEY set in environment variables");
 }
 
 /**
@@ -38,19 +39,12 @@ router.post("/session", async (req: Request, res: Response) => {
       });
     }
 
-    // Ensure owner pubkey is configured
-    if (!OWNER_PUBKEY) {
-      return res.status(500).json({
-        error: "Server configuration error",
-        message: "Owner pubkey not configured",
-      });
-    }
+    const isWhitelistedUser = await userStorage.isUserAllowed(event.pubkey);
 
-    // Check if pubkey matches owner
-    if (event.pubkey !== OWNER_PUBKEY) {
+    if (!isWhitelistedUser) {
       return res.status(403).json({
         error: "Unauthorized",
-        message: "Only the server owner can create sessions",
+        message: "User not whitelisted",
       });
     }
 

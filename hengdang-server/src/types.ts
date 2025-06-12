@@ -5,6 +5,7 @@ export interface FileMetadata {
   contentLength: number;
   timestamp: number;
   chunkCount: number;
+  owner?: string; // pubkey of the owner
 }
 
 export interface ChunkKey {

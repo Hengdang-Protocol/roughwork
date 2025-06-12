@@ -7,7 +7,9 @@ import { config } from './config';
 import { storage } from './storage/lmdb';
 import fileRoutes from './routes/files';
 import eventRoutes from './routes/events';
+import eventsStreamRoutes from './routes/events-stream';
 import authRoutes from './routes/auth';
+import adminRoutes from './routes/admin';
 
 const app = express();
 
@@ -25,8 +27,8 @@ app.use(express.json());
 
 // Raw body parser only for file routes (PUT/POST to file paths)
 app.use('/*', (req, res, next) => {
-  // Only use raw parser for file operations (PUT requests that aren't to /auth or /events)
-  if (req.method === 'PUT' && !req.path.startsWith('/auth') && !req.path.startsWith('/events')) {
+  // Only use raw parser for file operations (PUT requests that aren't to /auth, /events, or /admin)
+  if (req.method === 'PUT' && !req.path.startsWith('/auth') && !req.path.startsWith('/events') && !req.path.startsWith('/admin')) {
     express.raw({
       limit: config.maxFileSize,
       type: '*/*'
@@ -38,7 +40,9 @@ app.use('/*', (req, res, next) => {
 
 // Routes
 app.use('/events', eventRoutes);
+app.use('/events', eventsStreamRoutes); // SSE routes
 app.use('/auth', authRoutes);
+app.use('/admin', adminRoutes); // Admin routes
 app.use('/', fileRoutes); // Files on root path
 
 // Health check
@@ -78,6 +82,7 @@ process.on('SIGTERM', async () => {
 app.listen(config.port, () => {
   console.log(`Hengdang server running on http://localhost:${config.port}`);
   console.log(`Data directory: ${config.dataDir}`);
+  console.log(`Admin API: ${process.env.ADMIN_KEY ? 'Enabled' : 'Disabled (set ADMIN_KEY)'}`);
 });
 
 export default app;

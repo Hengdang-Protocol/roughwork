@@ -1,14 +1,27 @@
 import { createHash } from 'crypto';
 import { storage } from './lmdb';
+import { userStorage } from './users';
 import { FileMetadata, DirectoryEntry, DirectoryListing, ListOptions, Event, CHUNK_SIZE } from '../types';
 
 export class FileStorage {
   
-  async writeFile(path: string, content: Buffer): Promise<FileMetadata> {
+  async writeFile(path: string, content: Buffer, userPubkey?: string): Promise<FileMetadata> {
+    // Check storage limit if user provided
+    if (userPubkey) {
+      const hasSpace = await userStorage.checkStorageLimit(userPubkey, content.length);
+      if (!hasSpace) {
+        throw new Error('Storage limit exceeded');
+      }
+    }
+
     const fileId = storage.generateFileId();
     const contentHash = createHash('sha256').update(content).digest('hex');
     const contentType = this.detectContentType(content, path);
     const timestamp = Date.now();
+    
+    // Check if file exists (for storage accounting)
+    const existingMetadata = await storage.files.get(path);
+    const bytesChanged = content.length - (existingMetadata?.contentLength || 0);
     
     // Store chunks
     const chunkCount = Math.ceil(content.length / CHUNK_SIZE);
@@ -21,17 +34,23 @@ export class FileStorage {
       await storage.blobs.put(chunkKey, chunk);
     }
 
-    // Store metadata
+    // Store metadata with owner info
     const metadata: FileMetadata = {
       path,
       contentHash,
       contentType,
       contentLength: content.length,
       timestamp,
-      chunkCount
+      chunkCount,
+      owner: userPubkey // Add owner field
     };
 
     await storage.files.put(path, metadata);
+
+    // Update user storage usage
+    if (userPubkey && bytesChanged !== 0) {
+      await userStorage.updateStorageUsage(userPubkey, bytesChanged);
+    }
 
     // Create event
     const event: Event = {
@@ -73,6 +92,11 @@ export class FileStorage {
       await storage.blobs.remove(chunkKey);
     }
 
+    // Update user storage usage
+    if (metadata.owner) {
+      await userStorage.updateStorageUsage(metadata.owner, -metadata.contentLength);
+    }
+
     // Delete metadata
     await storage.files.remove(path);
 
@@ -91,7 +115,7 @@ export class FileStorage {
     return await storage.files.get(path);
   }
 
-  async listDirectory(dirPath: string, options: ListOptions): Promise<DirectoryListing> {
+  async listDirectory(dirPath: string, options: ListOptions, userPubkey?: string): Promise<DirectoryListing> {
     const { limit = 100, cursor, reverse = false, shallow = true } = options;
     const prefix = dirPath.endsWith('/') ? dirPath : dirPath + '/';
     const startKey = cursor || prefix;
@@ -107,6 +131,9 @@ export class FileStorage {
 
     for (const { key: filePath, value: metadata } of range) {
       if (!filePath.startsWith(prefix)) break;
+      
+      // Filter by user ownership if specified
+      if (userPubkey && metadata.owner !== userPubkey) continue;
       
       if (shallow) {
         const relativePath = filePath.substring(prefix.length);

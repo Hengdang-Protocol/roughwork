@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { sessionStorage } from '../storage/sessions';
+import { userStorage } from '../storage/users';
 import { Session } from '../types';
 
 // Extend Request interface to include session
@@ -36,8 +37,18 @@ export async function authenticateSession(req: Request, res: Response, next: Nex
       });
     }
 
-    // Update last used time
+    // Check if user is still allowed
+    const userAllowed = await userStorage.isUserAllowed(session.pubkey);
+    if (!userAllowed) {
+      return res.status(403).json({
+        error: 'User disabled',
+        message: 'User account has been disabled by administrator'
+      });
+    }
+
+    // Update last used time and user last active
     await sessionStorage.updateLastUsed(sessionId);
+    await userStorage.updateLastActive(session.pubkey);
 
     // Attach session to request
     req.session = session;
@@ -93,8 +104,13 @@ export async function optionalAuth(req: Request, res: Response, next: NextFuncti
     if (sessionId) {
       const session = await sessionStorage.getSession(sessionId);
       if (session) {
-        await sessionStorage.updateLastUsed(sessionId);
-        req.session = session;
+        // Check if user is still allowed
+        const userAllowed = await userStorage.isUserAllowed(session.pubkey);
+        if (userAllowed) {
+          await sessionStorage.updateLastUsed(sessionId);
+          await userStorage.updateLastActive(session.pubkey);
+          req.session = session;
+        }
       }
     }
 
