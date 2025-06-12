@@ -44,6 +44,7 @@ export const useHengdang = () => {
   const [authLoading, setAuthLoading] = useState(true);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress[]>([]);
   const [fileStates, setFileStates] = useState<Map<string, FileState>>(new Map());
+  const [previewFile, setPreviewFile] = useState<string | null>(null);
 
   // SSE connection ref
   const sseCleanupRef = useRef<(() => void) | null>(null);
@@ -195,10 +196,18 @@ export const useHengdang = () => {
     setError(null);
 
     try {
+      console.log("Loading directory:", path);
       const listing = await client.listDirectory(path);
-      setFiles(listing.entries);
+      console.log("Directory listing:", listing);
+      
+      // Ensure we always have an array
+      const entries = listing?.entries || [];
+      setFiles(entries);
       setCurrentPath(path);
+      
+      console.log("Set files:", entries);
     } catch (err: any) {
+      console.error("Error loading directory:", err);
       if (err instanceof AuthenticationError) {
         setIsAuthenticated(false);
         setSessionInfo(null);
@@ -206,10 +215,54 @@ export const useHengdang = () => {
       } else {
         setError(err.message || "Failed to load directory");
       }
-      setFiles([]);
+      setFiles([]); // Ensure files is always an array
     } finally {
       if (showLoading) setLoading(false);
     }
+  };
+
+  // Enhanced navigation function to handle both files and directories
+  const navigateToPath = async (path: string) => {
+    if (!isAuthenticated) {
+      setError("Authentication required");
+      return;
+    }
+
+    console.log("Navigating to path:", path);
+
+    try {
+      setError(null);
+
+      // First, try to get metadata to determine if it's a file or directory
+      const metadata = await client.getMetadata(path);
+      
+      if (metadata) {
+        // It's a file - always open preview
+        console.log("Path is a file, opening preview:", path);
+        setPreviewFile(path);
+        return;
+      }
+
+      // It's a directory or doesn't exist, try to list it
+      await loadDirectory(path, false);
+    } catch (err: any) {
+      console.error("Navigation error:", err);
+      if (err.response?.status === 404) {
+        // Could be a directory that doesn't exist or empty, try to list it anyway
+        try {
+          await loadDirectory(path, false);
+        } catch (dirErr: any) {
+          setError("File or directory not found");
+        }
+      } else {
+        setError(err.message || "Failed to navigate");
+      }
+    }
+  };
+
+  // Add preview file state setter to the hook return
+  const setPreviewFileState = (path: string | null) => {
+    setPreviewFile(path);
   };
 
   const uploadFile = async (path: string, file: File) => {
@@ -407,6 +460,9 @@ export const useHengdang = () => {
     deleteFile,
     downloadFile,
 
+    // Navigation - use the enhanced function
+    onNavigate: navigateToPath,
+
     // Authentication
     isAuthenticated,
     sessionInfo,
@@ -421,6 +477,10 @@ export const useHengdang = () => {
     fileStates,
     checkFileLock,
     getFileForPreview,
+
+    // Preview control
+    previewFile,
+    setPreviewFile: setPreviewFileState,
 
     // Client
     client,

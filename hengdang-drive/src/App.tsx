@@ -26,13 +26,15 @@ const App: React.FC = () => {
     uploadProgress,
     clearUploadProgress,
     fileStates,
-    getFileForPreview
+    getFileForPreview,
+    onNavigate,
+    previewFile,
+    setPreviewFile
   } = useHengdang();
 
   const [authError, setAuthError] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [retryCount, setRetryCount] = useState(0);
-  const [previewFile, setPreviewFile] = useState<string | null>(null);
 
   // Listen for online/offline status
   React.useEffect(() => {
@@ -60,6 +62,13 @@ const App: React.FC = () => {
 
   const handleNavigate = (path: string) => {
     setRetryCount(0);
+    // Use the enhanced navigation function that distinguishes files from directories
+    onNavigate(path);
+  };
+
+  const handleDirectoryNavigate = (path: string) => {
+    setRetryCount(0);
+    // Force directory navigation (for breadcrumbs)
     loadDirectory(path);
   };
 
@@ -68,7 +77,7 @@ const App: React.FC = () => {
     await loadDirectory(currentPath);
   };
 
-  const handlePreview = async (path: string) => {
+  const handlePreview = (path: string) => {
     setPreviewFile(path);
   };
 
@@ -164,7 +173,7 @@ const App: React.FC = () => {
 
         <Header 
           currentPath={currentPath} 
-          onNavigate={handleNavigate}
+          onNavigate={handleDirectoryNavigate}
           sessionInfo={sessionInfo}
           onLogout={logout}
         />

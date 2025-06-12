@@ -168,6 +168,23 @@ export const FileGrid: React.FC<FileGridProps> = ({
 }) => {
   const [hoveredFile, setHoveredFile] = useState<string | null>(null);
 
+  // Safety check for files array
+  if (!files || !Array.isArray(files)) {
+    return (
+      <div className="text-center py-20">
+        <div className="w-24 h-24 mx-auto mb-6 bg-red-100 dark:bg-red-900/30 rounded-3xl flex items-center justify-center">
+          <Folder size={40} className="text-red-400 dark:text-red-500" />
+        </div>
+        <h3 className="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-3">
+          Error loading files
+        </h3>
+        <p className="text-gray-500 dark:text-gray-400 text-lg">
+          There was an issue loading the file list
+        </p>
+      </div>
+    );
+  }
+
   if (files.length === 0) {
     return (
       <div className="text-center py-20">
@@ -227,7 +244,7 @@ export const FileGrid: React.FC<FileGridProps> = ({
                   
                   {/* File Info */}
                   <div className="space-y-1">
-                    {file.type === 'file' && file.size && (
+                    {file.type === 'file' && file.size !== undefined && (
                       <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">
                         {formatFileSize(file.size)}
                       </p>
