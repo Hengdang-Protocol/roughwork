@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { storage } from './lmdb';
+import { directoryStorage } from './directories';
 import { userStorage } from './users';
 import { FileMetadata, DirectoryEntry, DirectoryListing, ListOptions, Event, CHUNK_SIZE } from '../types';
 
@@ -12,6 +13,11 @@ export class FileStorage {
       if (!hasSpace) {
         throw new Error('Storage limit exceeded');
       }
+    }
+
+    // Ensure parent directories exist
+    if (userPubkey) {
+      await directoryStorage.ensureParentDirectories(path, userPubkey);
     }
 
     const fileId = storage.generateFileId();
@@ -56,7 +62,8 @@ export class FileStorage {
     const event: Event = {
       timestamp: timestamp.toString(),
       operation: 'PUT',
-      path
+      path,
+      type: 'file'
     };
     await storage.events.put(timestamp.toString(), event);
 
@@ -104,7 +111,8 @@ export class FileStorage {
     const event: Event = {
       timestamp: Date.now().toString(),
       operation: 'DELETE',
-      path
+      path,
+      type: 'file'
     };
     await storage.events.put(Date.now().toString(), event);
 
@@ -117,58 +125,157 @@ export class FileStorage {
 
   async listDirectory(dirPath: string, options: ListOptions, userPubkey?: string): Promise<DirectoryListing> {
     const { limit = 100, cursor, reverse = false, shallow = true } = options;
-    const prefix = dirPath.endsWith('/') ? dirPath : dirPath + '/';
-    const startKey = cursor || prefix;
+    const normalizedPath = dirPath.endsWith('/') ? dirPath : dirPath + '/';
+    
+    // Check if directory exists
+    const directory = await directoryStorage.getDirectory(normalizedPath);
+    if (!directory) {
+      throw new Error('Directory not found');
+    }
+    
+    // Check permissions
+    if (userPubkey && directory.owner !== userPubkey) {
+      throw new Error('No permission to list directory');
+    }
     
     const entries: DirectoryEntry[] = [];
-    const seen = new Set<string>();
+    let foundCursor = !cursor;
 
-    const range = storage.files.getRange({
-      start: startKey,
-      limit: limit + 1,
-      reverse
-    });
+    if (shallow) {
+      // List immediate children only
+      
+      // First, list subdirectories
+      const dirRange = storage.directories.getRange({
+        start: normalizedPath,
+        reverse
+      });
 
-    for (const { key: filePath, value: metadata } of range) {
-      if (!filePath.startsWith(prefix)) break;
-      
-      // Filter by user ownership if specified
-      if (userPubkey && metadata.owner !== userPubkey) continue;
-      
-      if (shallow) {
-        const relativePath = filePath.substring(prefix.length);
-        const firstSegment = relativePath.split('/')[0];
+      for (const { key: subDirPath, value: subDirMetadata } of dirRange) {
+        if (!subDirPath.startsWith(normalizedPath) || subDirPath === normalizedPath) {
+          if (subDirPath !== normalizedPath) break;
+          continue;
+        }
         
-        if (seen.has(firstSegment)) continue;
-        seen.add(firstSegment);
+        // Check if this is a direct child (no additional slashes)
+        const relativePath = subDirPath.substring(normalizedPath.length);
+        const trimmed = relativePath.endsWith('/') ? relativePath.slice(0, -1) : relativePath;
+        if (trimmed.includes('/')) continue; // Not a direct child
         
-        const isDirectory = relativePath.includes('/');
+        if (cursor && !foundCursor) {
+          if (subDirPath === cursor) foundCursor = true;
+          continue;
+        }
+        
+        if (entries.length >= limit) break;
+        
         entries.push({
-          path: prefix + firstSegment + (isDirectory ? '/' : ''),
-          type: isDirectory ? 'directory' : 'file',
-          size: isDirectory ? undefined : metadata.contentLength,
-          contentType: isDirectory ? undefined : metadata.contentType,
-          lastModified: metadata.timestamp
-        });
-      } else {
-        entries.push({
-          path: filePath,
-          type: 'file',
-          size: metadata.contentLength,
-          contentType: metadata.contentType,
-          lastModified: metadata.timestamp
+          path: subDirPath,
+          type: 'directory',
+          lastModified: subDirMetadata.modified,
+          owner: subDirMetadata.owner
         });
       }
       
-      if (entries.length >= limit) break;
+      // Then, list files in this directory
+      const fileRange = storage.files.getRange({
+        start: normalizedPath,
+        reverse
+      });
+
+      for (const { key: filePath, value: fileMetadata } of fileRange) {
+        if (!filePath.startsWith(normalizedPath)) break;
+        
+        // Check if this is a direct child file
+        const relativePath = filePath.substring(normalizedPath.length);
+        if (relativePath.includes('/')) continue; // File in subdirectory
+        
+        if (cursor && !foundCursor) {
+          if (filePath === cursor) foundCursor = true;
+          continue;
+        }
+        
+        if (entries.length >= limit) break;
+        
+        entries.push({
+          path: filePath,
+          type: 'file',
+          size: fileMetadata.contentLength,
+          contentType: fileMetadata.contentType,
+          lastModified: fileMetadata.timestamp,
+          owner: fileMetadata.owner
+        });
+      }
+    } else {
+      // List all descendants (recursive)
+      
+      // List all subdirectories
+      const dirRange = storage.directories.getRange({
+        start: normalizedPath,
+        reverse
+      });
+
+      for (const { key: subDirPath, value: subDirMetadata } of dirRange) {
+        if (!subDirPath.startsWith(normalizedPath) || subDirPath === normalizedPath) {
+          if (subDirPath !== normalizedPath) break;
+          continue;
+        }
+        
+        if (cursor && !foundCursor) {
+          if (subDirPath === cursor) foundCursor = true;
+          continue;
+        }
+        
+        if (entries.length >= limit) break;
+        
+        entries.push({
+          path: subDirPath,
+          type: 'directory',
+          lastModified: subDirMetadata.modified,
+          owner: subDirMetadata.owner
+        });
+      }
+      
+      // List all files
+      const fileRange = storage.files.getRange({
+        start: normalizedPath,
+        reverse
+      });
+
+      for (const { key: filePath, value: fileMetadata } of fileRange) {
+        if (!filePath.startsWith(normalizedPath)) break;
+        
+        if (cursor && !foundCursor) {
+          if (filePath === cursor) foundCursor = true;
+          continue;
+        }
+        
+        if (entries.length >= limit) break;
+        
+        entries.push({
+          path: filePath,
+          type: 'file',
+          size: fileMetadata.contentLength,
+          contentType: fileMetadata.contentType,
+          lastModified: fileMetadata.timestamp,
+          owner: fileMetadata.owner
+        });
+      }
     }
 
-    const hasMore = entries.length > limit;
-    if (hasMore) entries.pop();
+    // Sort entries by type (directories first) then by path
+    entries.sort((a, b) => {
+      if (a.type !== b.type) {
+        return a.type === 'directory' ? -1 : 1;
+      }
+      return reverse ? b.path.localeCompare(a.path) : a.path.localeCompare(b.path);
+    });
+
+    const hasMore = entries.length >= limit;
+    const actualEntries = hasMore ? entries.slice(0, limit) : entries;
     
     return {
-      entries,
-      nextCursor: hasMore && entries.length > 0 ? entries[entries.length - 1].path : undefined,
+      entries: actualEntries,
+      nextCursor: hasMore && actualEntries.length > 0 ? actualEntries[actualEntries.length - 1].path : undefined,
       hasMore
     };
   }

@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { userStorage } from '../storage/users';
 import { sessionStorage } from '../storage/sessions';
 import { fileStorage } from '../storage/files';
+import { directoryStorage } from '../storage/directories';
 import { lockStorage } from '../storage/locks';
 import { storage } from '../storage/lmdb';
 
@@ -177,9 +178,9 @@ router.delete('/users/:pubkey', async (req: Request, res: Response) => {
     }
     
     // Delete all user files
-    const range = storage.files.getRange({});
+    const fileRange = storage.files.getRange({});
     const filesToDelete: string[] = [];
-    for (const { key: path, value: metadata } of range) {
+    for (const { key: path, value: metadata } of fileRange) {
       if (metadata.owner === pubkey) {
         filesToDelete.push(path);
       }
@@ -187,6 +188,22 @@ router.delete('/users/:pubkey', async (req: Request, res: Response) => {
     
     for (const path of filesToDelete) {
       await fileStorage.deleteFile(path);
+    }
+    
+    // Delete all user directories
+    const directoryRange = storage.directories.getRange({});
+    const directoriesToDelete: string[] = [];
+    for (const { key: path, value: metadata } of directoryRange) {
+      if (metadata.owner === pubkey) {
+        directoriesToDelete.push(path);
+      }
+    }
+    
+    // Sort directories by depth (deepest first) to delete safely
+    directoriesToDelete.sort((a, b) => b.split('/').length - a.split('/').length);
+    
+    for (const path of directoriesToDelete) {
+      await directoryStorage.deleteDirectory(path, pubkey);
     }
     
     // Delete user record
@@ -229,10 +246,18 @@ router.get('/stats', async (req: Request, res: Response) => {
       }
     }
     
+    // Count directories
+    let totalDirectories = 0;
+    const dirRange = storage.directories.getRange({});
+    for (const {} of dirRange) {
+      totalDirectories++;
+    }
+    
     res.json({
       ...systemStats,
       recentEvents,
       activeSessions,
+      totalDirectories,
       timestamp: now
     });
   } catch (error) {

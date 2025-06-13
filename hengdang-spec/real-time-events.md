@@ -2,7 +2,7 @@
 
 ## Abstract
 
-This document specifies the real-time event system for Hengdang homeservers using Server-Sent Events (SSE) to notify clients of file changes.
+This document specifies the real-time event system for Hengdang homeservers using Server-Sent Events (SSE) to notify clients of file and directory changes.
 
 ## Specification
 
@@ -10,7 +10,7 @@ This document specifies the real-time event system for Hengdang homeservers usin
 
 **GET** `/events/stream`
 
-Establishes a Server-Sent Events connection for real-time file change notifications.
+Establishes a Server-Sent Events connection for real-time file and directory change notifications.
 
 Requires authentication (session token).
 
@@ -36,7 +36,7 @@ Optional query parameter:
 - `path`: Filter events to specific path or path prefix
 
 Examples:
-- `/events/stream` - All file changes
+- `/events/stream` - All file and directory changes
 - `/events/stream?path=/documents` - Only `/documents` changes
 - `/events/stream?path=/documents/*` - All files under `/documents/`
 - `/events/stream?path=/documents/file.txt` - Only specific file
@@ -48,7 +48,11 @@ Events use standard SSE format:
 ```
 data: {"type":"file_change","path":"/documents/file.txt","operation":"PUT","timestamp":1736726400000}
 
-data: {"type":"file_change","path":"/documents/old.txt","operation":"DELETE","timestamp":1736726401000}
+data: {"type":"directory_change","path":"/documents/newfolder/","operation":"MKDIR","timestamp":1736726401000}
+
+data: {"type":"file_change","path":"/documents/old.txt","operation":"DELETE","timestamp":1736726402000}
+
+data: {"type":"directory_change","path":"/documents/oldfolder/","operation":"RMDIR","timestamp":1736726403000}
 ```
 
 #### Connection Event
@@ -78,9 +82,28 @@ Fields:
 - `operation`: `"PUT"` (create/update) or `"DELETE"`
 - `timestamp`: Unix timestamp in milliseconds
 
+#### Directory Change Event
+
+Sent when directories are created or deleted:
+
+```json
+{
+  "type": "directory_change",
+  "path": "/documents/newfolder/",
+  "operation": "MKDIR",
+  "timestamp": 1736726400000
+}
+```
+
+Fields:
+- `type`: Always `"directory_change"`
+- `path`: Full directory path (ends with `/`)
+- `operation`: `"MKDIR"` (create) or `"RMDIR"` (delete)
+- `timestamp`: Unix timestamp in milliseconds
+
 ### Event Delivery
 
-- Events are only sent to connections authenticated with the file owner's session
+- Events are only sent to connections authenticated with the file/directory owner's session
 - Path filtering is applied server-side
 - No event history or replay - only live events
 - Connection drops on authentication failure
@@ -95,6 +118,8 @@ eventSource.onmessage = function(event) {
   
   if (data.type === 'file_change') {
     console.log(`File ${data.operation}: ${data.path}`);
+  } else if (data.type === 'directory_change') {
+    console.log(`Directory ${data.operation}: ${data.path}`);
   }
 };
 
@@ -107,6 +132,4 @@ eventSource.onerror = function(event) {
 
 - Clients should handle connection drops and reconnect
 - Servers may close idle connections
-- No ping/keepalive messages defined</parameter>
-</invoke>
-</artifacts:function_calls>
+- No ping/keepalive messages defined

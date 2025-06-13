@@ -1,19 +1,60 @@
-# Files
+# Files and Directories
 
 ## Abstract
 
-This document specifies the file operations API for Hengdang homeservers, defining how clients read, write, and manage files.
+This document specifies the file and directory operations API for Hengdang homeservers, defining how clients read, write, and manage files and directories.
 
 ## Specification
 
 ### Path Format
 
-File paths MUST:
+File and directory paths MUST:
 - Start with `/`
 - Not contain `..` (path traversal)
 - Not contain control characters (0x00-0x1F, 0x7F)
 - Not exceed 4096 characters
 - Not contain empty segments (`//`)
+
+### Directory Operations
+
+#### Creating Directories
+
+**POST** `/<path>/`
+
+Creates a new directory. Parent directories must exist.
+
+Request body:
+```json
+{
+  "description": "Optional description"
+}
+```
+
+Response (201):
+```json
+{
+  "path": "/documents/",
+  "owner": "abc123...",
+  "created": 1736726400000
+}
+```
+
+Error responses:
+- `409 Conflict` - Directory already exists
+- `400 Bad Request` - Parent directory does not exist
+- `403 Forbidden` - No permission to create in parent directory
+
+#### Deleting Directories
+
+**DELETE** `/<path>/`
+
+Removes an empty directory.
+
+Response: `204 No Content` or `404 Not Found`
+
+Error responses:
+- `409 Conflict` - Directory is not empty
+- `403 Forbidden` - No permission to delete directory
 
 ### File Metadata
 
@@ -27,9 +68,9 @@ Response headers:
 - `ETag`: Content hash and timestamp
 - `Last-Modified`: HTTP date format
 
-Response: 200 OK or 404 Not Found
+Response: `200 OK` or `404 Not Found`
 
-### Reading Files
+### Reading Files and Listing Directories
 
 **GET** `/<path>`
 
@@ -41,7 +82,7 @@ Supports conditional headers:
 - `If-None-Match`: ETag value
 - `If-Modified-Since`: HTTP date
 
-Returns 304 Not Modified if conditions match.
+Returns `304 Not Modified` if conditions match.
 
 #### File Response
 
@@ -88,7 +129,7 @@ Response (200):
 
 **PUT** `/<path>`
 
-Writes file content.
+Writes file content. Parent directories are created automatically.
 
 Request body: File content (binary)
 
@@ -99,7 +140,7 @@ Supports conditional headers:
 - `If-None-Match`: Only write if ETag doesn't match or `*`
 - `If-Unmodified-Since`: Only write if not modified since date
 
-Returns 412 Precondition Failed if conditions fail.
+Returns `412 Precondition Failed` if conditions fail.
 
 #### Response
 
@@ -126,7 +167,7 @@ Response (201 for new, 200 for update):
 
 Removes a file.
 
-Response: 204 No Content or 404 Not Found
+Response: `204 No Content` or `404 Not Found`
 
 ### Content Type Detection
 
@@ -148,4 +189,11 @@ Where:
 
 Files include cache headers:
 - `Cache-Control: public, max-age=3600` (files)
-- `Cache-Control: public, max-age=300` (directories)</parameter>
+- `Cache-Control: public, max-age=300` (directories)
+
+### Directory Structure
+
+- Directories are explicit entities that must be created before use
+- Parent directories are automatically created when uploading files
+- Directories must be empty before deletion
+- Directory listings show both files and subdirectories

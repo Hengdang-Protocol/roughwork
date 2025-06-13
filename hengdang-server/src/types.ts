@@ -8,6 +8,15 @@ export interface FileMetadata {
   owner?: string; // pubkey of the owner
 }
 
+export interface DirectoryMetadata {
+  path: string;
+  owner: string;
+  created: number;
+  modified: number;
+  permissions?: string[];
+  description?: string;
+}
+
 export interface ChunkKey {
   fileId: string;
   chunkIndex: number;
@@ -19,6 +28,7 @@ export interface DirectoryEntry {
   size?: number;
   contentType?: string;
   lastModified: number;
+  owner?: string;
 }
 
 export interface DirectoryListing {
@@ -36,8 +46,9 @@ export interface ListOptions {
 
 export interface Event {
   timestamp: string;
-  operation: 'PUT' | 'DELETE';
+  operation: 'PUT' | 'DELETE' | 'MKDIR' | 'RMDIR';
   path: string;
+  type: 'file' | 'directory';
 }
 
 export interface EventListing {
@@ -72,6 +83,16 @@ export interface AuthResponse {
   expiresAt: number;
 }
 
+export interface CreateDirectoryRequest {
+  permissions?: string[];
+  description?: string;
+}
+
+export interface CreateDirectoryResponse {
+  path: string;
+  owner: string;
+  created: number;
+}
 
 export const CHUNK_SIZE = 512 * 1024; // 512KB
 export const DEFAULT_LIST_LIMIT = 100;

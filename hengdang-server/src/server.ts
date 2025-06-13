@@ -5,6 +5,7 @@ import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import { config } from './config';
 import { storage } from './storage/lmdb';
+import { directoryStorage } from './storage/directories';
 import fileRoutes from './routes/files';
 import eventRoutes from './routes/events';
 import eventsStreamRoutes from './routes/events-stream';
@@ -37,6 +38,23 @@ app.use('/*', (req, res, next) => {
     next();
   }
 });
+
+// Initialize root directory for system
+async function initializeSystem() {
+  try {
+    // Check if root directory exists, create if not
+    const rootExists = await directoryStorage.exists('/');
+    if (!rootExists) {
+      console.log('Creating root directory...');
+      // Use a default system owner for root directory
+      await directoryStorage.createDirectory('/', 'system', {
+        description: 'Root directory'
+      });
+    }
+  } catch (error) {
+    console.error('Failed to initialize system:', error);
+  }
+}
 
 // Routes
 app.use('/events', eventRoutes);
@@ -78,11 +96,17 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
-// Start server
-app.listen(config.port, () => {
-  console.log(`Hengdang server running on http://localhost:${config.port}`);
-  console.log(`Data directory: ${config.dataDir}`);
-  console.log(`Admin API: ${process.env.ADMIN_KEY ? 'Enabled' : 'Disabled (set ADMIN_KEY)'}`);
-});
+// Initialize system and start server
+async function start() {
+  await initializeSystem();
+  
+  app.listen(config.port, () => {
+    console.log(`Hengdang server running on http://localhost:${config.port}`);
+    console.log(`Data directory: ${config.dataDir}`);
+    console.log(`Admin API: ${process.env.ADMIN_KEY ? 'Enabled' : 'Disabled (set ADMIN_KEY)'}`);
+  });
+}
+
+start().catch(console.error);
 
 export default app;

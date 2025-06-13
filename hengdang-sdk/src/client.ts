@@ -14,7 +14,10 @@ import {
   NostrEvent,
   AuthResponse,
   SessionInfo,
-  FileChangeEvent
+  FileChangeEvent,
+  DirectoryChangeEvent,
+  CreateDirectoryOptions,
+  CreateDirectoryResponse
 } from './types';
 
 export class HengdangClient {
@@ -111,13 +114,19 @@ export class HengdangClient {
   /**
    * Subscribe to changes with a callback function
    */
-  onFileChange(callback: (event: FileChangeEvent) => void, pathFilter?: string): () => void {
+  onFileChange(callback: (event: FileChangeEvent | DirectoryChangeEvent) => void, pathFilter?: string): () => void {
     const eventSource = this.subscribeToChanges(pathFilter);
     
     const handleMessage = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'file_change') {
+          callback({
+            path: data.path,
+            operation: data.operation,
+            timestamp: data.timestamp
+          });
+        } else if (data.type === 'directory_change') {
           callback({
             path: data.path,
             operation: data.operation,
@@ -169,6 +178,32 @@ export class HengdangClient {
     this.sessionId = undefined;
   }
 
+  // === DIRECTORY OPERATIONS ===
+
+  /**
+   * Create a new directory
+   */
+  async createDirectory(path: string, options?: CreateDirectoryOptions): Promise<CreateDirectoryResponse> {
+    const response = await this.api.post(path, options || {});
+    return response.data;
+  }
+
+  /**
+   * Delete a directory (must be empty)
+   */
+  async deleteDirectory(path: string): Promise<boolean> {
+    try {
+      const normalizedPath = path.endsWith('/') ? path : path + '/';
+      await this.api.delete(normalizedPath);
+      return true;
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
   // === FILE OPERATIONS ===
 
   /**
@@ -215,7 +250,6 @@ export class HengdangClient {
     const uint8 = new TextEncoder().encode(text);
     return this.uploadFile(path, uint8, options);
   }
-
 
   /**
    * Upload a JSON file
@@ -334,7 +368,8 @@ export class HengdangClient {
     if (options.reverse !== undefined) params.reverse = options.reverse;
     if (options.shallow !== undefined) params.shallow = options.shallow;
 
-    const response = await this.api.get(path, { params });
+    const normalizedPath = path.endsWith('/') ? path : path + '/';
+    const response = await this.api.get(normalizedPath, { params });
     return response.data;
   }
 
@@ -407,7 +442,6 @@ export class HengdangClient {
       throw error;
     }
   }
-
 
   /**
    * Batch upload multiple files

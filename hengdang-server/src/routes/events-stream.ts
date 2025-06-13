@@ -78,6 +78,30 @@ export function broadcastFileChange(userPubkey: string, path: string, operation:
 }
 
 /**
+ * Broadcast directory change event to relevant connected clients
+ */
+export function broadcastDirectoryChange(userPubkey: string, path: string, operation: 'MKDIR' | 'RMDIR') {
+  const event = {
+    type: 'directory_change',
+    path,
+    operation,
+    timestamp: Date.now()
+  };
+
+  // Send only to connections for this user and matching path filter
+  for (const [sessionId, connectionInfo] of sseConnections.entries()) {
+    if (connectionInfo.pubkey === userPubkey && pathMatches(path, connectionInfo.pathFilter || '')) {
+      try {
+        connectionInfo.response.write(`data: ${JSON.stringify(event)}\n\n`);
+      } catch (error) {
+        // Connection died, remove it
+        sseConnections.delete(sessionId);
+      }
+    }
+  }
+}
+
+/**
  * Get count of active SSE connections
  */
 export function getActiveConnectionCount(): number {

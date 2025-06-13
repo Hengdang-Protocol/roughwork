@@ -21,12 +21,6 @@ export interface DirectoryListing {
   hasMore: boolean;
 }
 
-export interface Event {
-  timestamp: string;
-  operation: 'PUT' | 'DELETE';
-  path: string;
-}
-
 export interface EventListing {
   events: Event[];
   nextCursor?: string;
@@ -120,12 +114,35 @@ export interface ConditionalRequestOptions {
   ifUnmodifiedSince?: Date | string;
 }
 
+export interface CreateDirectoryOptions {
+  description?: string;
+}
+
+export interface CreateDirectoryResponse {
+  path: string;
+  owner: string;
+  created: number;
+}
+
 // === SSE TYPES ===
 
 export interface FileChangeEvent {
   path: string;
   operation: 'PUT' | 'DELETE';
   timestamp: number;
+}
+
+export interface DirectoryChangeEvent {
+  path: string;
+  operation: 'MKDIR' | 'RMDIR';
+  timestamp: number;
+}
+
+export interface Event {
+  timestamp: string;
+  operation: 'PUT' | 'DELETE' | 'MKDIR' | 'RMDIR';
+  path: string;
+  type: 'file' | 'directory';
 }
 
 // === ERROR TYPES ===
